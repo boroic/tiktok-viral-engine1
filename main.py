@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 import os
 import logging
 
@@ -70,6 +70,11 @@ def home():
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"}), 200
+
+
+@app.get("/app")
+def web_app():
+    return render_template("index.html")
 
 
 @app.post("/run")
