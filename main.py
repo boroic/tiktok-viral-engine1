@@ -1,6 +1,10 @@
 from flask import Flask, jsonify, request, render_template
 import os
 import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from uuid import uuid4
+from werkzeug.utils import secure_filename
 
 from src.trend_detector import TikTokTrendDetector
 from src.sound_analyzer import SoundAnalyzer
@@ -16,6 +20,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app"))
+FALLBACK_UPLOAD_DIR = Path(os.environ.get("FALLBACK_UPLOAD_DIR", "/tmp/app"))
+ALLOWED_MEDIA_EXTENSIONS = {
+    "jpg", "jpeg", "png", "webp", "gif",
+    "mp4", "mov", "avi", "mkv", "webm"
+}
+ALLOWED_VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "mkv", "webm"}
+ALLOWED_MEDIA_MIME_PREFIXES = ("image/", "video/")
+GENERIC_TOPIC_TOKENS = {"img", "image", "vid", "video", "wa", "dsc", "pxl", "mvimg"}
+
 
 class TikTokViralEngine:
     def __init__(self):
@@ -27,6 +41,25 @@ class TikTokViralEngine:
         self.uploader = UploadHandler()
         self.influencer_finder = InfluencerFinder()
         self.api_manager = APIManager()
+        self.max_topic_words = 8
+
+    def analyze_media_context(self, media_path: Path):
+        suffix = media_path.suffix.lower().lstrip(".")
+        stem = media_path.stem.replace("_", " ").replace("-", " ").strip()
+        is_video = suffix in ALLOWED_VIDEO_EXTENSIONS
+        media_type = "video" if is_video else "image"
+
+        keywords = [part for part in stem.split() if part and not part.isdigit()]
+        keywords = [part for part in keywords if part.lower() not in GENERIC_TOPIC_TOKENS]
+        topic = " ".join(keywords[: self.max_topic_words]) if keywords else f"{media_type} content"
+
+        return {
+            "media_type": media_type,
+            "extension": suffix,
+            "filename": media_path.name,
+            "topic_hint": topic,
+            "stored_path": str(media_path)
+        }
 
     def run_full_pipeline(self, topic: str = "viral_trends"):
         logger.info(f"Running pipeline for topic={topic}")
@@ -57,9 +90,41 @@ class TikTokViralEngine:
             "sounds": sounds
         }
 
+    def run_from_media(self, media_path: Path):
+        media_context = self.analyze_media_context(media_path)
+        topic = media_context.get("topic_hint", "viral content")
+        result = self.run_full_pipeline(topic=topic)
+        result["media_context"] = media_context
+        return result
+
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024
 engine = TikTokViralEngine()
+
+
+def resolve_upload_dir():
+    for candidate in (UPLOAD_DIR, FALLBACK_UPLOAD_DIR):
+        probe = candidate / ".write_test"
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe.write_text("ok", encoding="utf-8")
+            return candidate
+        except Exception:
+            continue
+        finally:
+            try:
+                probe.unlink(missing_ok=True)
+            except Exception:
+                pass
+    raise OSError("No writable upload directory available")
+
+
+def extract_extension(filename: str):
+    return Path(filename).suffix.lower().lstrip(".")
+
+
+UPLOAD_STORAGE_DIR = resolve_upload_dir()
 
 
 @app.get("/")
@@ -97,6 +162,63 @@ def run_pipeline():
         return jsonify({
             "status": "error",
             "message": str(e)
+        }), 500
+
+
+@app.post("/run-from-media")
+def run_pipeline_from_media():
+    stored_path = None
+    try:
+        upload = request.files.get("media")
+        if upload is None or upload.filename is None or not upload.filename.strip():
+            return jsonify({
+                "status": "error",
+                "message": "media file is required"
+            }), 400
+
+        filename = secure_filename(upload.filename)
+        if not filename:
+            return jsonify({
+                "status": "error",
+                "message": "invalid media filename"
+            }), 400
+
+        suffix = extract_extension(filename)
+        if suffix not in ALLOWED_MEDIA_EXTENSIONS:
+            return jsonify({
+                "status": "error",
+                "message": "unsupported media type"
+            }), 400
+
+        mimetype = (upload.mimetype or "").lower()
+        if not mimetype.startswith(ALLOWED_MEDIA_MIME_PREFIXES):
+            return jsonify({
+                "status": "error",
+                "message": "invalid media mimetype"
+            }), 400
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        stored_filename = f"{timestamp}_{uuid4().hex}_{filename}"
+        stored_path = UPLOAD_STORAGE_DIR / stored_filename
+        upload.save(stored_path)
+
+        result = engine.run_from_media(stored_path)
+        return jsonify(result), 200
+
+    except Exception as e:
+        if stored_path is not None and stored_path.exists():
+            try:
+                stored_path.unlink()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Failed to clean up uploaded media at %s: %s",
+                    stored_path,
+                    cleanup_error
+                )
+        logger.exception("Pipeline from media failed")
+        return jsonify({
+            "status": "error",
+            "message": "internal server error"
         }), 500
 
 
