@@ -112,12 +112,25 @@ class TikTokViralEngine:
 
 
 if __name__ == "__main__":
-    # Initialize engine
-    engine = TikTokViralEngine()
-    
-    # Run full pipeline
-    result = engine.run_full_pipeline(topic="viral_trends")
-    
-    logger.info("=" * 50)
-    logger.info("🎉 PIPELINE COMPLETE!")
-    logger.info("=" * 50)
+    import os
+    import argparse
+
+    # Parse command line arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mock-upload", action="store_true", help="Run CLI pipeline")
+    parser.add_argument("--topic", default="viral_trends", help="Topic to generate content for")
+    args = parser.parse_args()
+
+    if args.mock_upload:
+        # Run CLI pipeline mode
+        engine = TikTokViralEngine()
+        result = engine.run_full_pipeline(topic=args.topic)
+        logger.info("=" * 50)
+        logger.info("🎉 PIPELINE COMPLETE!")
+        logger.info("=" * 50)
+    else:
+        # Run Flask HTTP server mode (Railway)
+        from src.app import app
+        port = int(os.environ.get("PORT", 5000))
+        logger.info(f"🚀 Starting Flask server on 0.0.0.0:{port}")
+        app.run(host="0.0.0.0", port=port, debug=False)
