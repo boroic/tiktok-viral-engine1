@@ -571,8 +571,8 @@
     }
 
     async function runFromMedia() {
-      var mediaInput = document.getElementById("mediaInput");
-      var file = mediaInput.files && mediaInput.files[0];
+      const mediaInput = document.getElementById("mediaInput");
+      const file = mediaInput.files && mediaInput.files[0];
       hideError();
       document.getElementById("results").className = "";
 
@@ -584,18 +584,18 @@
       setLoading(true, "media upload");
 
       try {
-        var form = new FormData();
+        const form = new FormData();
         form.append("media", file);
 
-        var res = await fetch("/run-from-media", {
+        const res = await fetch("/run-from-media", {
           method: "POST",
           body: form
         });
 
-        var data = await res.json();
+        const data = await res.json();
 
         if (!res.ok) {
-          var msg = (data && data.message) ? data.message : JSON.stringify(data, null, 2);
+          const msg = (data && data.message) ? data.message : JSON.stringify(data, null, 2);
           showError("Error " + res.status + ": " + msg);
         } else {
           renderResults(data);

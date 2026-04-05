@@ -26,6 +26,7 @@ ALLOWED_MEDIA_EXTENSIONS = {
     "jpg", "jpeg", "png", "webp", "gif",
     "mp4", "mov", "avi", "mkv", "webm"
 }
+ALLOWED_VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "mkv", "webm"}
 ALLOWED_MEDIA_MIME_PREFIXES = ("image/", "video/")
 
 
@@ -44,7 +45,7 @@ class TikTokViralEngine:
     def analyze_media_context(self, media_path: Path):
         suffix = media_path.suffix.lower().lstrip(".")
         stem = media_path.stem.replace("_", " ").replace("-", " ").strip()
-        is_video = suffix in {"mp4", "mov", "avi", "mkv", "webm"}
+        is_video = suffix in ALLOWED_VIDEO_EXTENSIONS
         media_type = "video" if is_video else "image"
 
         keywords = [part for part in stem.split() if part and not part.isdigit()]
@@ -104,14 +105,18 @@ engine = TikTokViralEngine()
 
 def resolve_upload_dir():
     for candidate in (UPLOAD_DIR, FALLBACK_UPLOAD_DIR):
+        probe = candidate / ".write_test"
         try:
             candidate.mkdir(parents=True, exist_ok=True)
-            probe = candidate / ".write_test"
             probe.write_text("ok", encoding="utf-8")
-            probe.unlink(missing_ok=True)
             return candidate
         except Exception:
             continue
+        finally:
+            try:
+                probe.unlink(missing_ok=True)
+            except Exception:
+                pass
     raise OSError("No writable upload directory available")
 
 
@@ -188,7 +193,7 @@ def run_pipeline_from_media():
                 "message": "invalid media mimetype"
             }), 400
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
         stored_filename = f"{timestamp}_{uuid4().hex}_{filename}"
         stored_path = UPLOAD_STORAGE_DIR / stored_filename
         upload.save(stored_path)
@@ -200,8 +205,12 @@ def run_pipeline_from_media():
         if stored_path is not None and stored_path.exists():
             try:
                 stored_path.unlink()
-            except Exception:
-                logger.warning("Failed to clean up uploaded media at %s", stored_path)
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Failed to clean up uploaded media at %s: %s",
+                    stored_path,
+                    cleanup_error
+                )
         logger.exception("Pipeline from media failed")
         return jsonify({
             "status": "error",
