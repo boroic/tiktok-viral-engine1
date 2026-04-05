@@ -33,6 +33,9 @@ def generate():
 
     data = request.get_json(silent=True) or {}
     topic = data.get("topic", "viral_trends")
+    if not isinstance(topic, str) or not topic.strip():
+        return jsonify({"status": "error", "message": "Invalid topic"}), 400
+    topic = topic.strip()
 
     engine = TikTokViralEngine()
     result = engine.run_full_pipeline(topic=topic)
