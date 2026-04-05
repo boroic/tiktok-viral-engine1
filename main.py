@@ -37,6 +37,7 @@ class TikTokViralEngine:
         self.uploader = UploadHandler()
         self.influencer_finder = InfluencerFinder()
         self.api_manager = APIManager()
+        self.max_topic_words = 8
 
     def analyze_media_context(self, media_path: Path):
         suffix = media_path.suffix.lower().lstrip(".")
@@ -45,7 +46,7 @@ class TikTokViralEngine:
         media_type = "video" if is_video else "image"
 
         keywords = [part for part in stem.split() if part]
-        topic = " ".join(keywords[:4]) if keywords else f"{media_type} content"
+        topic = " ".join(keywords[: self.max_topic_words]) if keywords else f"{media_type} content"
 
         return {
             "media_type": media_type,
@@ -110,6 +111,9 @@ def resolve_upload_dir():
     raise OSError("No writable upload directory available")
 
 
+UPLOAD_STORAGE_DIR = resolve_upload_dir()
+
+
 @app.get("/")
 def home():
     return jsonify({"status": "ok", "service": "tiktok-viral-engine1"}), 200
@@ -172,10 +176,9 @@ def run_pipeline_from_media():
                 "message": "unsupported media type"
             }), 400
 
-        upload_dir = resolve_upload_dir()
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         stored_filename = f"{timestamp}_{filename}"
-        stored_path = upload_dir / stored_filename
+        stored_path = UPLOAD_STORAGE_DIR / stored_filename
         upload.save(stored_path)
 
         result = engine.run_from_media(stored_path)
