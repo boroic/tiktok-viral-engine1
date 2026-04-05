@@ -349,11 +349,13 @@ def run_pipeline_from_media():
             stored_paths.append(stored_path)
             try:
                 media_hash = save_upload_and_hash(upload, stored_path)
-            except ValueError as validation_error:
+            except ValueError:
                 return jsonify({
                     "status": "error",
                     "message": "media validation failed",
-                    "errors": [f"{filename}: {validation_error}"]
+                    "errors": [
+                        f"{filename}: file too large (max {format_bytes(MAX_MEDIA_FILE_BYTES)})"
+                    ]
                 }), 400
             results.append(engine.run_from_media(stored_path, media_hash=media_hash))
 
