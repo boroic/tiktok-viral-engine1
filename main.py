@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import os
 
 app = Flask(__name__)
@@ -10,6 +10,16 @@ def home():
 @app.get("/health")
 def health():
     return jsonify({"status":"ok"}), 200
+
+@app.post("/run")
+def run():
+    data = request.get_json(silent=True) or {}
+    topic = data.get("topic", "viral_trends")
+    return jsonify({
+        "status": "success",
+        "message": "Pipeline trigger endpoint works",
+        "topic": topic
+    }), 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
