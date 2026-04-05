@@ -28,6 +28,7 @@ ALLOWED_MEDIA_EXTENSIONS = {
 }
 ALLOWED_VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "mkv", "webm"}
 ALLOWED_MEDIA_MIME_PREFIXES = ("image/", "video/")
+GENERIC_TOPIC_TOKENS = {"img", "image", "vid", "video", "wa", "dsc", "pxl", "mvimg"}
 
 
 class TikTokViralEngine:
@@ -49,8 +50,7 @@ class TikTokViralEngine:
         media_type = "video" if is_video else "image"
 
         keywords = [part for part in stem.split() if part and not part.isdigit()]
-        generic_tokens = {"img", "image", "vid", "video", "wa", "dsc", "pxl", "mvimg"}
-        keywords = [part for part in keywords if part.lower() not in generic_tokens]
+        keywords = [part for part in keywords if part.lower() not in GENERIC_TOPIC_TOKENS]
         topic = " ".join(keywords[: self.max_topic_words]) if keywords else f"{media_type} content"
 
         return {
@@ -120,6 +120,10 @@ def resolve_upload_dir():
     raise OSError("No writable upload directory available")
 
 
+def extract_extension(filename: str):
+    return Path(filename).suffix.lower().lstrip(".")
+
+
 UPLOAD_STORAGE_DIR = resolve_upload_dir()
 
 
@@ -179,7 +183,7 @@ def run_pipeline_from_media():
                 "message": "invalid media filename"
             }), 400
 
-        suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        suffix = extract_extension(filename)
         if suffix not in ALLOWED_MEDIA_EXTENSIONS:
             return jsonify({
                 "status": "error",
@@ -193,7 +197,7 @@ def run_pipeline_from_media():
                 "message": "invalid media mimetype"
             }), 400
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         stored_filename = f"{timestamp}_{uuid4().hex}_{filename}"
         stored_path = UPLOAD_STORAGE_DIR / stored_filename
         upload.save(stored_path)
