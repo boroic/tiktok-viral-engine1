@@ -33,6 +33,25 @@ class ScriptGenerator:
             })
         return scripts
     
+    def generate_hashtags(self, topic):
+        """Generate viral hashtags for a topic"""
+        return [
+            f"#{topic}",
+            "#viral",
+            "#foryoupage",
+            "#fyp",
+            "#trending",
+            "#tiktok"
+        ]
+
+    def generate_captions(self, topic):
+        """Generate caption options for a topic"""
+        return [
+            f"🔥 The ultimate {topic} guide you need to see!",
+            f"✨ Everything you need to know about {topic}",
+            f"💡 {topic} tips that actually work!"
+        ]
+
     def get_viral_hooks(self):
         """Get proven viral hook templates"""
         return [
