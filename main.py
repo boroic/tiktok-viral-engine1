@@ -277,11 +277,11 @@ def run_pipeline():
         result = engine.run_full_pipeline(topic=topic.strip())
         return jsonify(result), 200
 
-    except Exception as e:
+    except Exception:
         logger.exception("Pipeline failed")
         return jsonify({
             "status": "error",
-            "message": str(e)
+            "message": "internal server error"
         }), 500
 
 
