@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TikTok Viral Engine</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 0 16px;
+      background: #fafafa;
+      color: #222;
+    }
+    h1 { margin-bottom: 6px; }
+    .muted { color: #666; margin-bottom: 24px; font-size: 14px; }
+    .row { display: flex; gap: 8px; }
+    input[type="text"] {
+      flex: 1;
+      font-size: 16px;
+      padding: 10px 12px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      outline: none;
+    }
+    input[type="text"]:focus { border-color: #555; }
+    button {
+      font-size: 16px;
+      padding: 10px 20px;
+      background: #111;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button:disabled { background: #888; cursor: not-allowed; }
+    h3 { margin-top: 28px; margin-bottom: 8px; }
+    pre {
+      background: #111;
+      color: #0f0;
+      padding: 16px;
+      border-radius: 8px;
+      overflow: auto;
+      min-height: 60px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .error { color: #f55; }
+  </style>
+</head>
+<body>
+  <h1>🚀 TikTok Viral Engine</h1>
+  <p class="muted">Enter a topic and run the full content pipeline.</p>
+
+  <div class="row">
+    <input id="topic" type="text" placeholder="e.g. fitness motivation" />
+    <button id="runBtn" onclick="runPipeline()">Run</button>
+  </div>
+
+  <h3>Result</h3>
+  <pre id="out">Waiting for input...</pre>
+
+  <script>
+    async function runPipeline() {
+      const topicInput = document.getElementById("topic");
+      const out = document.getElementById("out");
+      const btn = document.getElementById("runBtn");
+      const topic = topicInput.value.trim() || "viral_trends";
+
+      out.className = "";
+      out.textContent = "Running pipeline for \"" + topic + "\"…";
+      btn.disabled = true;
+
+      try {
+        const res = await fetch("/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topic })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          out.className = "error";
+          out.textContent = "Error " + res.status + ": " + JSON.stringify(data, null, 2);
+        } else {
+          out.textContent = JSON.stringify(data, null, 2);
+        }
+      } catch (e) {
+        out.className = "error";
+        out.textContent = "Network error: " + e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById("topic").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") runPipeline();
+    });
+  </script>
+</body>
+</html>
