@@ -2,5 +2,5 @@
   "name": "tiktok-viral-engine",
   "runtime": "python",
   "buildCommand": "pip install -r requirements.txt",
-  "startCommand": "python main.py --mock-upload --topic viral_trends"
+  "startCommand": "python main.py"
 }
