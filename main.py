@@ -20,6 +20,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 UPLOAD_DIR = Path("/app")
+FALLBACK_UPLOAD_DIR = Path("/tmp/app")
 ALLOWED_MEDIA_EXTENSIONS = {
     "jpg", "jpeg", "png", "webp", "gif",
     "mp4", "mov", "avi", "mkv", "webm"
@@ -98,6 +99,19 @@ app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024
 engine = TikTokViralEngine()
 
 
+def resolve_upload_dir():
+    for candidate in (UPLOAD_DIR, FALLBACK_UPLOAD_DIR):
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe = candidate / ".write_test"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+            return candidate
+        except Exception:
+            continue
+    raise OSError("No writable upload directory available")
+
+
 @app.get("/")
 def home():
     return jsonify({"status": "ok", "service": "tiktok-viral-engine1"}), 200
@@ -160,10 +174,10 @@ def run_pipeline_from_media():
                 "message": "unsupported media type"
             }), 400
 
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        upload_dir = resolve_upload_dir()
         timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
         stored_filename = f"{timestamp}_{filename}"
-        stored_path = UPLOAD_DIR / stored_filename
+        stored_path = upload_dir / stored_filename
         upload.save(stored_path)
 
         result = engine.run_from_media(stored_path)
