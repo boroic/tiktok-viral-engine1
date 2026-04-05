@@ -19,4 +19,5 @@ colorama==0.4.6
 tqdm==4.65.0
 psycopg2-binary==2.9.6
 redis==4.5.5
-celery==5.3.1
+celery==5.3.1streamlit==1.28.1
+streamlit-option-menu==0.3.2
