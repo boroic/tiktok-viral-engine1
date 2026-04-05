@@ -626,6 +626,10 @@
       try { return JSON.parse(text); } catch (e) { return null; }
     }
 
+    function getRetryDelayMs(attempt) {
+      return RETRY_DELAY_BASE_MS * attempt;
+    }
+
     async function fetchJsonWithRetry(url, options, retryLabel) {
       var attempt = 0;
       var lastError = null;
@@ -643,7 +647,7 @@
           if (attempt < MAX_RETRIES && RETRYABLE_STATUS[res.status]) {
             attempt++;
             setProgress(null, "Retrying " + retryLabel + " after HTTP " + res.status + "...");
-            await new Promise(function(resolve) { setTimeout(resolve, RETRY_DELAY_BASE_MS * attempt); });
+            await new Promise(function(resolve) { setTimeout(resolve, getRetryDelayMs(attempt)); });
             continue;
           }
           return { res: res, data: data || { message: text || "Request failed" } };
@@ -653,7 +657,7 @@
           if (attempt < MAX_RETRIES) {
             attempt++;
             setProgress(null, "Retrying " + retryLabel + " after network timeout/error...");
-            await new Promise(function(resolve) { setTimeout(resolve, RETRY_DELAY_BASE_MS * attempt); });
+            await new Promise(function(resolve) { setTimeout(resolve, getRetryDelayMs(attempt)); });
             continue;
           }
           throw e;
@@ -693,7 +697,7 @@
             if (attempt < MAX_RETRIES && RETRYABLE_STATUS[xhr.status]) {
               attempt++;
               setProgress(null, "Retrying media upload after HTTP " + xhr.status + "...");
-              setTimeout(startAttempt, RETRY_DELAY_BASE_MS * attempt);
+              setTimeout(startAttempt, getRetryDelayMs(attempt));
               return;
             }
             resolve({
@@ -706,7 +710,7 @@
             if (attempt < MAX_RETRIES) {
               attempt++;
               setProgress(null, "Retrying media upload after network error...");
-              setTimeout(startAttempt, RETRY_DELAY_BASE_MS * attempt);
+              setTimeout(startAttempt, getRetryDelayMs(attempt));
               return;
             }
             reject(new Error("Network error while uploading media"));
@@ -716,7 +720,7 @@
             if (attempt < MAX_RETRIES) {
               attempt++;
               setProgress(null, "Retrying media upload after timeout...");
-              setTimeout(startAttempt, RETRY_DELAY_BASE_MS * attempt);
+              setTimeout(startAttempt, getRetryDelayMs(attempt));
               return;
             }
             reject(new Error("Upload timed out after " + (REQUEST_TIMEOUT_MS / 1000) + "s"));

@@ -187,14 +187,27 @@ def get_upload_size_bytes(upload):
 
 def save_upload_and_hash(upload, destination: Path):
     hasher = hashlib.sha256()
+    total_bytes = 0
     upload.stream.seek(0)
-    with destination.open("wb") as target:
-        while True:
-            chunk = upload.stream.read(1024 * 1024)
-            if not chunk:
-                break
-            hasher.update(chunk)
-            target.write(chunk)
+    try:
+        with destination.open("wb") as target:
+            while True:
+                chunk = upload.stream.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > MAX_MEDIA_FILE_BYTES:
+                    raise ValueError(
+                        f"file too large ({format_bytes(total_bytes)} > {format_bytes(MAX_MEDIA_FILE_BYTES)})"
+                    )
+                hasher.update(chunk)
+                target.write(chunk)
+    except Exception:
+        try:
+            destination.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
     return hasher.hexdigest()
 
 
@@ -334,7 +347,14 @@ def run_pipeline_from_media():
             stored_filename = f"{timestamp}_{uuid4().hex}_{filename}"
             stored_path = UPLOAD_STORAGE_DIR / stored_filename
             stored_paths.append(stored_path)
-            media_hash = save_upload_and_hash(upload, stored_path)
+            try:
+                media_hash = save_upload_and_hash(upload, stored_path)
+            except ValueError as validation_error:
+                return jsonify({
+                    "status": "error",
+                    "message": "media validation failed",
+                    "errors": [f"{filename}: {validation_error}"]
+                }), 400
             results.append(engine.run_from_media(stored_path, media_hash=media_hash))
 
         if len(results) == 1:
