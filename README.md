@@ -62,3 +62,27 @@ cp .env.example .env
 
 # Run Streamlit dashboard
 streamlit run app.py
+```
+
+### Flask API
+
+```bash
+python main.py
+```
+
+#### Run full pipeline by topic
+
+```bash
+curl -X POST http://localhost:8080/run \
+  -H "Content-Type: application/json" \
+  -d '{"topic":"fitness motivation"}'
+```
+
+#### Run full pipeline from uploaded media
+
+Uploads an image/video to `/app`, analyzes media context, and generates script/captions/hashtags from the media-derived topic.
+
+```bash
+curl -X POST http://localhost:8080/run-from-media \
+  -F "media=@/path/to/your/video.mp4"
+```

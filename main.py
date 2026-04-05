@@ -1,6 +1,9 @@
 from flask import Flask, jsonify, request, render_template
 import os
 import logging
+from datetime import datetime
+from pathlib import Path
+from werkzeug.utils import secure_filename
 
 from src.trend_detector import TikTokTrendDetector
 from src.sound_analyzer import SoundAnalyzer
@@ -16,6 +19,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+UPLOAD_DIR = Path("/app")
+ALLOWED_MEDIA_EXTENSIONS = {
+    "jpg", "jpeg", "png", "webp", "gif",
+    "mp4", "mov", "avi", "mkv", "webm"
+}
+
 
 class TikTokViralEngine:
     def __init__(self):
@@ -27,6 +36,25 @@ class TikTokViralEngine:
         self.uploader = UploadHandler()
         self.influencer_finder = InfluencerFinder()
         self.api_manager = APIManager()
+
+    def analyze_media_context(self, media_path: Path):
+        suffix = media_path.suffix.lower().lstrip(".")
+        stem = media_path.stem.replace("_", " ").replace("-", " ").strip()
+        is_video = suffix in {"mp4", "mov", "avi", "mkv", "webm"}
+        media_type = "video" if is_video else "image"
+
+        keywords = [part for part in stem.split() if part]
+        topic = " ".join(keywords[:4]) if keywords else f"{media_type} content"
+        if not topic:
+            topic = "viral content"
+
+        return {
+            "media_type": media_type,
+            "extension": suffix or "unknown",
+            "filename": media_path.name,
+            "topic_hint": topic,
+            "stored_path": str(media_path)
+        }
 
     def run_full_pipeline(self, topic: str = "viral_trends"):
         logger.info(f"Running pipeline for topic={topic}")
@@ -57,8 +85,16 @@ class TikTokViralEngine:
             "sounds": sounds
         }
 
+    def run_from_media(self, media_path: Path):
+        media_context = self.analyze_media_context(media_path)
+        topic = media_context.get("topic_hint", "viral content")
+        result = self.run_full_pipeline(topic=topic)
+        result["media_context"] = media_context
+        return result
+
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024
 engine = TikTokViralEngine()
 
 
@@ -94,6 +130,47 @@ def run_pipeline():
 
     except Exception as e:
         logger.exception("Pipeline failed")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+
+@app.post("/run-from-media")
+def run_pipeline_from_media():
+    try:
+        upload = request.files.get("media")
+        if upload is None or upload.filename is None or not upload.filename.strip():
+            return jsonify({
+                "status": "error",
+                "message": "media file is required"
+            }), 400
+
+        filename = secure_filename(upload.filename)
+        if not filename:
+            return jsonify({
+                "status": "error",
+                "message": "invalid media filename"
+            }), 400
+
+        suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if suffix not in ALLOWED_MEDIA_EXTENSIONS:
+            return jsonify({
+                "status": "error",
+                "message": "unsupported media type"
+            }), 400
+
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+        stored_filename = f"{timestamp}_{filename}"
+        stored_path = UPLOAD_DIR / stored_filename
+        upload.save(stored_path)
+
+        result = engine.run_from_media(stored_path)
+        return jsonify(result), 200
+
+    except Exception as e:
+        logger.exception("Pipeline from media failed")
         return jsonify({
             "status": "error",
             "message": str(e)

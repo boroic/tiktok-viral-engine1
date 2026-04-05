@@ -248,11 +248,15 @@
 </head>
 <body>
   <h1>🚀 TikTok Viral Engine</h1>
-  <p class="muted">Enter a topic and run the full content pipeline.</p>
+  <p class="muted">Enter a topic or upload media and run the content pipeline.</p>
 
   <div class="row">
     <input id="topic" type="text" placeholder="e.g. fitness motivation" />
     <button id="runBtn" onclick="runPipeline()">▶ Run</button>
+  </div>
+  <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+    <input id="mediaInput" type="file" accept="image/*,video/*" />
+    <button id="runMediaBtn" onclick="runFromMedia()">🖼️ Run from Media</button>
   </div>
 
   <!-- Loading indicator -->
@@ -339,6 +343,7 @@
         ? 'Running pipeline for "' + topic + '"...'
         : "";
       document.getElementById("runBtn").disabled = on;
+      document.getElementById("runMediaBtn").disabled = on;
     }
 
     function showError(msg) {
@@ -557,6 +562,47 @@
           showError("Error " + res.status + ": " + msg);
         } else {
           renderResults(data);
+        }
+      } catch (e) {
+        showError("Network error: " + e.message);
+      } finally {
+        setLoading(false, "");
+      }
+    }
+
+    async function runFromMedia() {
+      var mediaInput = document.getElementById("mediaInput");
+      var file = mediaInput.files && mediaInput.files[0];
+      hideError();
+      document.getElementById("results").className = "";
+
+      if (!file) {
+        showError("Please select an image or video file first.");
+        return;
+      }
+
+      setLoading(true, file.name);
+
+      try {
+        var form = new FormData();
+        form.append("media", file);
+
+        var res = await fetch("/run-from-media", {
+          method: "POST",
+          body: form
+        });
+
+        var data = await res.json();
+
+        if (!res.ok) {
+          var msg = (data && data.message) ? data.message : JSON.stringify(data, null, 2);
+          showError("Error " + res.status + ": " + msg);
+        } else {
+          renderResults(data);
+          if (data.media_context && data.media_context.filename) {
+            document.getElementById("topicLabel").textContent =
+              "Media: " + data.media_context.filename + " · Topic: " + (data.topic || "");
+          }
         }
       } catch (e) {
         showError("Network error: " + e.message);
