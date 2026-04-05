@@ -3,7 +3,9 @@ TikTok Viral Engine - Main Entry Point
 Orchestrates all modules for viral content generation
 """
 
+import argparse
 import logging
+import os
 from src.trend_detector import TikTokTrendDetector
 from src.sound_analyzer import SoundAnalyzer
 from src.video_analytics import VideoAnalytics
@@ -11,6 +13,7 @@ from src.script_generator import ScriptGenerator
 from src.upload_handler import UploadHandler
 from src.influencer_finder import InfluencerFinder
 from src.api_client import APIManager
+from src.app import app
 
 # Setup logging
 logging.basicConfig(
@@ -112,12 +115,20 @@ class TikTokViralEngine:
 
 
 if __name__ == "__main__":
-    # Initialize engine
-    engine = TikTokViralEngine()
-    
-    # Run full pipeline
-    result = engine.run_full_pipeline(topic="viral_trends")
-    
-    logger.info("=" * 50)
-    logger.info("🎉 PIPELINE COMPLETE!")
-    logger.info("=" * 50)
+    parser = argparse.ArgumentParser(description="TikTok Viral Engine")
+    parser.add_argument("--mock-upload", action="store_true", help="Use mock upload mode")
+    parser.add_argument("--topic", default="viral_trends", help="Topic for content generation")
+    args = parser.parse_args()
+
+    if args.mock_upload:
+        # CLI mode: run the pipeline once before starting the server
+        engine = TikTokViralEngine()
+        result = engine.run_full_pipeline(topic=args.topic)
+
+        logger.info("=" * 50)
+        logger.info("🎉 PIPELINE COMPLETE!")
+        logger.info("=" * 50)
+
+    port = int(os.environ.get("PORT", 5000))
+    logger.info(f"🌐 Starting Flask server on 0.0.0.0:{port}")
+    app.run(host="0.0.0.0", port=port)
