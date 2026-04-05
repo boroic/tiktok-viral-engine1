@@ -24,3 +24,6 @@ def run():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port, debug=False)
+git add main.py
+git commit -m "Wire /run to real pipeline in root main.py"
+git push origin main
