@@ -82,3 +82,8 @@ class TestingConfig(Config):
     TESTING = True
     DATABASE_URL = "sqlite:///:memory:"
     ENABLE_AUTO_UPLOAD = False
+# Database Manager
+class DatabaseConfig:
+    """Database-specific configuration"""
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ECHO = True  # Log SQL queries in development
