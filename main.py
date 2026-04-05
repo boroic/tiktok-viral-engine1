@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request, render_template
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from werkzeug.utils import secure_filename
 
@@ -46,12 +46,10 @@ class TikTokViralEngine:
 
         keywords = [part for part in stem.split() if part]
         topic = " ".join(keywords[:4]) if keywords else f"{media_type} content"
-        if not topic:
-            topic = "viral content"
 
         return {
             "media_type": media_type,
-            "extension": suffix or "unknown",
+            "extension": suffix,
             "filename": media_path.name,
             "topic_hint": topic,
             "stored_path": str(media_path)
@@ -175,7 +173,7 @@ def run_pipeline_from_media():
             }), 400
 
         upload_dir = resolve_upload_dir()
-        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
         stored_filename = f"{timestamp}_{filename}"
         stored_path = upload_dir / stored_filename
         upload.save(stored_path)
@@ -187,7 +185,7 @@ def run_pipeline_from_media():
         logger.exception("Pipeline from media failed")
         return jsonify({
             "status": "error",
-            "message": str(e)
+            "message": "internal server error"
         }), 500
 
 
