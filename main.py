@@ -3,6 +3,7 @@ import os
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 from werkzeug.utils import secure_filename
 
 from src.trend_detector import TikTokTrendDetector
@@ -19,12 +20,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-UPLOAD_DIR = Path("/app")
-FALLBACK_UPLOAD_DIR = Path("/tmp/app")
+UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app"))
+FALLBACK_UPLOAD_DIR = Path(os.environ.get("FALLBACK_UPLOAD_DIR", "/tmp/app"))
 ALLOWED_MEDIA_EXTENSIONS = {
     "jpg", "jpeg", "png", "webp", "gif",
     "mp4", "mov", "avi", "mkv", "webm"
 }
+ALLOWED_MEDIA_MIME_PREFIXES = ("image/", "video/")
 
 
 class TikTokViralEngine:
@@ -45,7 +47,9 @@ class TikTokViralEngine:
         is_video = suffix in {"mp4", "mov", "avi", "mkv", "webm"}
         media_type = "video" if is_video else "image"
 
-        keywords = [part for part in stem.split() if part]
+        keywords = [part for part in stem.split() if part and not part.isdigit()]
+        generic_tokens = {"img", "image", "vid", "video", "wa", "dsc", "pxl", "mvimg"}
+        keywords = [part for part in keywords if part.lower() not in generic_tokens]
         topic = " ".join(keywords[: self.max_topic_words]) if keywords else f"{media_type} content"
 
         return {
@@ -154,6 +158,7 @@ def run_pipeline():
 
 @app.post("/run-from-media")
 def run_pipeline_from_media():
+    stored_path = None
     try:
         upload = request.files.get("media")
         if upload is None or upload.filename is None or not upload.filename.strip():
@@ -176,8 +181,15 @@ def run_pipeline_from_media():
                 "message": "unsupported media type"
             }), 400
 
+        mimetype = (upload.mimetype or "").lower()
+        if not mimetype.startswith(ALLOWED_MEDIA_MIME_PREFIXES):
+            return jsonify({
+                "status": "error",
+                "message": "invalid media mimetype"
+            }), 400
+
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-        stored_filename = f"{timestamp}_{filename}"
+        stored_filename = f"{timestamp}_{uuid4().hex}_{filename}"
         stored_path = UPLOAD_STORAGE_DIR / stored_filename
         upload.save(stored_path)
 
@@ -185,6 +197,11 @@ def run_pipeline_from_media():
         return jsonify(result), 200
 
     except Exception as e:
+        if stored_path is not None and stored_path.exists():
+            try:
+                stored_path.unlink()
+            except Exception:
+                logger.warning("Failed to clean up uploaded media at %s", stored_path)
         logger.exception("Pipeline from media failed")
         return jsonify({
             "status": "error",
