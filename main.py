@@ -4,10 +4,6 @@ Orchestrates all modules for viral content generation
 """
 
 import logging
-import os
-import argparse
-from flask import Flask, jsonify
-
 from src.trend_detector import TikTokTrendDetector
 from src.sound_analyzer import SoundAnalyzer
 from src.video_analytics import VideoAnalytics
@@ -39,7 +35,9 @@ class TikTokViralEngine:
         logger.info("✅ All modules initialized")
 
     def run_full_pipeline(self, topic: str = "viral"):
+        """Execute complete viral content pipeline"""
         logger.info(f"🎬 Starting full pipeline for topic: {topic}")
+
         try:
             health = self.api_manager.health_check()
             logger.info(f"🏥 {health['status']}")
@@ -66,6 +64,7 @@ class TikTokViralEngine:
             logger.info(f"👥 Found {len(influencers)} potential influencers")
 
             logger.info("✅ Content ready for upload!")
+
             return {
                 "status": "success",
                 "topic": topic,
@@ -77,12 +76,17 @@ class TikTokViralEngine:
                 "trends": trends,
                 "sounds": sounds
             }
+
         except Exception as e:
             logger.error(f"❌ Pipeline failed: {e}")
             return {"status": "error", "message": str(e)}
 
 
 if __name__ == "__main__":
+    import os
+    import argparse
+    from flask import Flask, jsonify
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--mock-upload", action="store_true", help="Run CLI pipeline")
     parser.add_argument("--topic", default="viral_trends", help="Topic to generate content for")
@@ -101,6 +105,6 @@ if __name__ == "__main__":
         def health():
             return jsonify({"status": "ok"}), 200
 
-        port = int(os.environ.get("PORT", 5000))
+        port = int(os.environ.get("PORT", 8080))
         logger.info(f"🚀 Starting Flask server on 0.0.0.0:{port}")
         app.run(host="0.0.0.0", port=port, debug=False)
