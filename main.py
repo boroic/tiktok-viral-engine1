@@ -209,6 +209,19 @@ def collect_media_uploads():
     return [u for u in uploads if u is not None]
 
 
+def cleanup_stored_files(paths):
+    for stored_path in paths:
+        if stored_path.exists():
+            try:
+                stored_path.unlink()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Failed to clean up uploaded media at %s: %s",
+                    stored_path,
+                    cleanup_error
+                )
+
+
 UPLOAD_STORAGE_DIR = resolve_upload_dir()
 
 
@@ -334,32 +347,13 @@ def run_pipeline_from_media():
         }), 200
 
     except Exception as e:
-        for stored_path in stored_paths:
-            if stored_path.exists():
-                try:
-                    stored_path.unlink()
-                except Exception as cleanup_error:
-                    logger.warning(
-                        "Failed to clean up uploaded media at %s: %s",
-                        stored_path,
-                        cleanup_error
-                    )
         logger.exception("Pipeline from media failed")
         return jsonify({
             "status": "error",
             "message": "internal server error"
         }), 500
     finally:
-        for stored_path in stored_paths:
-            if stored_path.exists():
-                try:
-                    stored_path.unlink()
-                except Exception as cleanup_error:
-                    logger.warning(
-                        "Failed to clean up uploaded media at %s: %s",
-                        stored_path,
-                        cleanup_error
-                    )
+        cleanup_stored_files(stored_paths)
 
 
 if __name__ == "__main__":
