@@ -3,6 +3,7 @@ TikTok Viral Engine - Main Entry Point
 Orchestrates all modules for viral content generation
 """
 
+import argparse
 import logging
 from src.trend_detector import TikTokTrendDetector
 from src.sound_analyzer import SoundAnalyzer
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 class TikTokViralEngine:
     """Main orchestrator for all TikTok automation"""
     
-    def __init__(self):
+    def __init__(self, mock_upload=False):
         logger.info("🚀 Initializing TikTok Viral Engine...")
         
         # Initialize modules
@@ -30,8 +31,9 @@ class TikTokViralEngine:
         self.sound_analyzer = SoundAnalyzer()
         self.video_analytics = VideoAnalytics()
         self.script_gen = ScriptGenerator()
-        self.uploader = UploadHandler()
+        self.uploader = UploadHandler(mock_mode=mock_upload)
         self.influencer_finder = InfluencerFinder()
+        self.mock_upload = mock_upload
         
         # Initialize API Manager
         self.api_manager = APIManager()
@@ -75,9 +77,26 @@ class TikTokViralEngine:
             influencers = self.influencer_finder.find_collaborators(trends[0])
             logger.info(f"👥 Found {len(influencers)} potential influencers")
             
-            # 9. Ready for upload
-            logger.info("✅ Content ready for upload!")
-            
+            # 9. Upload (mock or real)
+            caption = captions[0] if captions else ""
+            upload_result = self.uploader.upload_video(
+                video_path="output/video.mp4",
+                caption=caption,
+                hashtags=hashtags,
+            )
+            if self.mock_upload:
+                logger.info(
+                    f"🎭 Mock upload complete: video_id={upload_result['video_id']} "
+                    f"url={upload_result['url']}"
+                )
+                upload_status = self.uploader.get_upload_status(upload_result["video_id"])
+                logger.info(
+                    f"📊 Mock status: {upload_status['status']} | "
+                    f"views={upload_status['views']} likes={upload_status['likes']}"
+                )
+            else:
+                logger.info(f"✅ Upload complete: video_id={upload_result['video_id']}")
+
             return {
                 "status": "success",
                 "topic": topic,
@@ -87,7 +106,8 @@ class TikTokViralEngine:
                 "predicted_analytics": analytics,
                 "influencers": influencers,
                 "trends": trends,
-                "sounds": sounds
+                "sounds": sounds,
+                "upload": upload_result,
             }
         
         except Exception as e:
@@ -112,11 +132,24 @@ class TikTokViralEngine:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="TikTok Viral Engine")
+    parser.add_argument(
+        "--mock-upload",
+        action="store_true",
+        help="Use mock TikTok upload instead of real API calls",
+    )
+    parser.add_argument(
+        "--topic",
+        default="viral_trends",
+        help="Topic to generate content for",
+    )
+    args = parser.parse_args()
+
     # Initialize engine
-    engine = TikTokViralEngine()
+    engine = TikTokViralEngine(mock_upload=args.mock_upload)
     
     # Run full pipeline
-    result = engine.run_full_pipeline(topic="viral_trends")
+    result = engine.run_full_pipeline(topic=args.topic)
     
     logger.info("=" * 50)
     logger.info("🎉 PIPELINE COMPLETE!")
