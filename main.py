@@ -150,7 +150,6 @@ class TikTokViralEngine:
         }
         if full_content_pack is not None:
             result["full_content_pack"] = full_content_pack
-            result.update(full_content_pack)
         return result
 
     def _get_cached_media_result(self, cache_key: str):

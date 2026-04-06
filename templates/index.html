@@ -350,6 +350,7 @@
     <button id="generateCopyBtn" class="primary" onclick="generateAndCopyCaption()">✨ Generate + Copy Caption</button>
     <button id="generateFullPackBtn" class="primary" onclick="generateFullPack()">📦 Generate Full Pack</button>
     <button id="copyAllBtn" class="secondary" onclick="copyAllContent()">📋 Copy All</button>
+    <span class="copy-feedback" id="copyFeedbackAll">Copied!</span>
     <button id="regenerateBtn" class="secondary" onclick="regenerate()">↻ Regenerate</button>
   </div>
   <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -463,7 +464,7 @@
       <summary>⚙️ Advanced</summary>
       <div class="advanced-actions">
         <button class="secondary" id="downloadBtn" onclick="downloadJSON()">⬇ Download JSON</button>
-        <button class="secondary" id="downloadTxtBtn" onclick="downloadTXT()">⬇ Export .txt</button>
+        <button class="secondary" id="downloadTxtBtn" onclick="downloadTxt()">⬇ Export .txt</button>
       </div>
       <pre class="raw-json" id="rawJson"></pre>
     </details>
@@ -1076,7 +1077,7 @@
       }, 100);
     }
 
-    function downloadTXT() {
+    function downloadTxt() {
       if (!_lastData && !_lastMediaResults) return;
       var text = buildAllTextPayload();
       var blob = new Blob([text], { type: "text/plain;charset=utf-8" });
@@ -1095,7 +1096,7 @@
 
     function copyAllContent() {
       if (!_lastData) return;
-      copySection("all", "copyFeedbackReadyCaption");
+      copySection("all", "copyFeedbackAll");
     }
 
     async function runPipeline(options) {
