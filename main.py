@@ -1,13 +1,19 @@
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request, render_template, send_file
 import os
 import logging
 import hashlib
 import threading
+import subprocess
+import shutil
 from collections import OrderedDict
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+from urllib import request as urllib_request
+from urllib import error as urllib_error
+import json
+import re
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
@@ -42,6 +48,175 @@ MEDIA_GROUNDING_FIELDS = ("ocr_text", "transcript_text", "keyframe_summary")
 CONTENT_MODE_CAPTION_ONLY = "caption_only"
 CONTENT_MODE_FULL_PACK = "full_content_pack"
 SUPPORTED_CONTENT_MODES = {CONTENT_MODE_CAPTION_ONLY, CONTENT_MODE_FULL_PACK}
+SUPPORTED_AUTO_DURATIONS = {30, 45, 60}
+SUPPORTED_VOICE_PRESETS = {"male", "female"}
+SUPPORTED_STYLE_PRESETS = {"educational", "storytelling", "checklist"}
+MAX_VOICEOVER_CHARS = 3000
+MAX_ARTIFACTS = int(os.environ.get("MAX_GENERATED_ARTIFACTS", "200"))
+
+
+def sanitize_for_srt(text: str):
+    normalized = re.sub(r"\s+", " ", str(text or "").strip())
+    return normalized[:200]
+
+
+def format_srt_timestamp(seconds_float: float):
+    total_ms = max(0, int(round(seconds_float * 1000)))
+    hours = total_ms // 3_600_000
+    total_ms %= 3_600_000
+    minutes = total_ms // 60_000
+    total_ms %= 60_000
+    seconds = total_ms // 1000
+    millis = total_ms % 1000
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+
+
+class BaseTTSProvider:
+    provider_name = "none"
+
+    def synthesize(self, text: str, voice_preset: str, destination: Path):
+        raise NotImplementedError
+
+
+class OpenAITTSProvider(BaseTTSProvider):
+    provider_name = "openai"
+
+    def __init__(self):
+        self.api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        self.model = os.environ.get("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+
+    def synthesize(self, text: str, voice_preset: str, destination: Path):
+        if not self.api_key:
+            return {
+                "status": "unavailable",
+                "provider": self.provider_name,
+                "message": "OPENAI_API_KEY is missing. Add it to enable AI voiceover."
+            }
+
+        voice = "alloy" if voice_preset == "male" else "nova"
+        payload = json.dumps({
+            "model": self.model,
+            "voice": voice,
+            "input": text
+        }).encode("utf-8")
+        req = urllib_request.Request(
+            "https://api.openai.com/v1/audio/speech",
+            data=payload,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+        )
+        try:
+            with urllib_request.urlopen(req, timeout=45) as resp:
+                audio = resp.read()
+                if not audio:
+                    return {
+                        "status": "error",
+                        "provider": self.provider_name,
+                        "message": "TTS provider returned empty audio."
+                    }
+                destination.write_bytes(audio)
+                return {
+                    "status": "success",
+                    "provider": self.provider_name,
+                    "message": "Voiceover generated successfully."
+                }
+        except urllib_error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="ignore")
+            except Exception:
+                body = ""
+            return {
+                "status": "error",
+                "provider": self.provider_name,
+                "message": f"TTS request failed with HTTP {exc.code}.",
+                "details": body[:400]
+            }
+        except Exception as exc:
+            return {
+                "status": "error",
+                "provider": self.provider_name,
+                "message": f"TTS generation failed: {exc}"
+            }
+
+
+class FacelessVideoAssembler:
+    def __init__(self):
+        self.ffmpeg = shutil.which("ffmpeg")
+
+    def ffmpeg_available(self):
+        return bool(self.ffmpeg)
+
+    def build_subtitles(self, scene_plan, duration_seconds: int, destination: Path):
+        lines = []
+        safe_scenes = scene_plan if isinstance(scene_plan, list) and scene_plan else []
+        if not safe_scenes:
+            safe_scenes = [{
+                "scene": 1,
+                "voiceover_text": "Hook, value, and call to action."
+            }]
+        scene_duration = float(duration_seconds) / float(len(safe_scenes))
+        cursor = 0.0
+        for idx, scene in enumerate(safe_scenes, 1):
+            start = cursor
+            end = duration_seconds if idx == len(safe_scenes) else min(duration_seconds, cursor + scene_duration)
+            cursor = end
+            text = sanitize_for_srt(scene.get("voiceover_text", "")) or f"Scene {idx}"
+            lines.append(str(idx))
+            lines.append(f"{format_srt_timestamp(start)} --> {format_srt_timestamp(end)}")
+            lines.append(text)
+            lines.append("")
+        destination.write_text("\n".join(lines), encoding="utf-8")
+
+    def assemble(self, duration_seconds: int, subtitle_path: Path, output_path: Path, audio_path: Path = None):
+        if not self.ffmpeg_available():
+            return {
+                "status": "unavailable",
+                "message": "ffmpeg is not installed in this environment. Install ffmpeg to export MP4."
+            }
+
+        filter_expr = (
+            f"subtitles={str(subtitle_path)}:force_style="
+            "'Fontsize=44,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,MarginV=150'"
+        )
+        cmd = [
+            self.ffmpeg,
+            "-y",
+            "-f", "lavfi",
+            "-i", f"color=c=0x111111:s=1080x1920:d={duration_seconds}",
+        ]
+        if audio_path and audio_path.exists():
+            cmd.extend(["-i", str(audio_path)])
+        else:
+            cmd.extend(["-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo:d={duration_seconds}"])
+        cmd.extend([
+            "-vf", filter_expr,
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-shortest",
+            str(output_path)
+        ])
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120)
+            if proc.returncode != 0:
+                return {
+                    "status": "error",
+                    "message": "Video assembly failed.",
+                    "details": (proc.stderr or proc.stdout or "")[-500:]
+                }
+            return {
+                "status": "success",
+                "message": "MP4 generated successfully."
+            }
+        except Exception as exc:
+            return {
+                "status": "error",
+                "message": f"Video assembly failed: {exc}"
+            }
 
 
 class TikTokViralEngine:
@@ -58,6 +233,10 @@ class TikTokViralEngine:
         self.media_result_cache = OrderedDict()
         self.media_result_cache_size = MEDIA_HASH_CACHE_SIZE
         self.cache_lock = threading.Lock()
+        self.tts_provider = OpenAITTSProvider()
+        self.video_assembler = FacelessVideoAssembler()
+        self.generated_artifacts = OrderedDict()
+        self.artifact_lock = threading.Lock()
 
     def analyze_media_context(self, media_path: Path):
         suffix = media_path.suffix.lower().lstrip(".")
@@ -173,6 +352,231 @@ class TikTokViralEngine:
         if normalized not in SUPPORTED_CONTENT_MODES:
             return CONTENT_MODE_CAPTION_ONLY
         return normalized
+
+    def _normalize_duration(self, duration):
+        try:
+            parsed = int(duration)
+        except Exception:
+            parsed = 45
+        if parsed not in SUPPORTED_AUTO_DURATIONS:
+            return 45
+        return parsed
+
+    def _normalize_voice_preset(self, preset):
+        value = str(preset or "female").strip().lower()
+        if value not in SUPPORTED_VOICE_PRESETS:
+            return "female"
+        return value
+
+    def _normalize_style_preset(self, preset):
+        value = str(preset or "educational").strip().lower()
+        if value not in SUPPORTED_STYLE_PRESETS:
+            return "educational"
+        return value
+
+    def _build_scene_plan(self, script, duration_seconds: int, style_preset: str):
+        hook = ""
+        cta = ""
+        body_lines = []
+        if isinstance(script, dict):
+            hook = self._normalize_optional_text(script.get("hook", ""), max_len=220)
+            cta = self._normalize_optional_text(script.get("cta", ""), max_len=220)
+            body_value = script.get("body", [])
+            if isinstance(body_value, list):
+                body_lines = [self._normalize_optional_text(line, max_len=220) for line in body_value if str(line or "").strip()]
+            elif isinstance(body_value, str) and body_value.strip():
+                body_lines = [self._normalize_optional_text(body_value, max_len=220)]
+        steps = []
+        if hook:
+            steps.append(hook)
+        steps.extend(body_lines[:3])
+        if cta:
+            steps.append(cta)
+        if not steps:
+            steps = ["Start with a clear promise.", "Deliver 3 concise value beats.", "Close with a direct CTA."]
+
+        scene_count = max(3, min(6, len(steps)))
+        if style_preset == "checklist":
+            scene_count = max(scene_count, 4)
+        elif style_preset == "storytelling":
+            scene_count = max(scene_count, 5)
+        per_scene = max(4, int(duration_seconds / scene_count))
+
+        style_templates = {
+            "educational": [
+                "Bold title card + kinetic text reveal",
+                "Solid background with key concept text",
+                "Checklist bullets with subtle zoom",
+                "Proof/result card with big numbers",
+                "CTA screen with save/follow prompt",
+            ],
+            "storytelling": [
+                "Hook statement on dark gradient background",
+                "Set-up beat with animated caption blocks",
+                "Conflict/insight beat with motion text",
+                "Resolution beat with highlighted takeaway",
+                "CTA ending card with brand color accent",
+            ],
+            "checklist": [
+                "Checklist title card",
+                "Item 1 card with kinetic numbering",
+                "Item 2 card with kinetic numbering",
+                "Item 3 card with kinetic numbering",
+                "Final CTA card",
+            ]
+        }
+        visuals = style_templates.get(style_preset, style_templates["educational"])
+        plan = []
+        cursor = 0
+        for idx in range(scene_count):
+            end = duration_seconds if idx == scene_count - 1 else min(duration_seconds, cursor + per_scene)
+            text_value = steps[idx] if idx < len(steps) else steps[-1]
+            plan.append({
+                "scene": idx + 1,
+                "start_second": cursor,
+                "end_second": end,
+                "visual_template": visuals[idx % len(visuals)],
+                "on_screen_text": text_value,
+                "voiceover_text": text_value
+            })
+            cursor = end
+        return plan
+
+    def _register_artifact(self, artifact_id: str, output_path: Path):
+        with self.artifact_lock:
+            self.generated_artifacts[artifact_id] = str(output_path)
+            self.generated_artifacts.move_to_end(artifact_id)
+            while len(self.generated_artifacts) > MAX_ARTIFACTS:
+                _old_id, old_path_str = self.generated_artifacts.popitem(last=False)
+                old_path = Path(old_path_str)
+                if old_path.exists():
+                    try:
+                        old_path.unlink()
+                    except Exception:
+                        pass
+
+    def _get_artifact_path(self, artifact_id: str):
+        with self.artifact_lock:
+            path_str = self.generated_artifacts.get(artifact_id)
+            if not path_str:
+                return None
+            self.generated_artifacts.move_to_end(artifact_id)
+        path = Path(path_str)
+        return path if path.exists() else None
+
+    def auto_create_video(
+        self,
+        topic: str,
+        tone: str,
+        target_audience: str,
+        duration,
+        voice_preset: str,
+        style_preset: str
+    ):
+        normalized_topic = self._normalize_optional_text(topic, max_len=120) or "viral trends"
+        normalized_tone = self._normalize_optional_text(tone, max_len=40) or "balanced"
+        normalized_audience = self._normalize_optional_text(target_audience, max_len=80) or "general"
+        normalized_duration = self._normalize_duration(duration)
+        normalized_voice = self._normalize_voice_preset(voice_preset)
+        normalized_style = self._normalize_style_preset(style_preset)
+
+        script = self.api_manager.openai.generate_script(
+            normalized_topic,
+            tone=normalized_tone,
+            target_audience=normalized_audience
+        )
+        hashtags = self.api_manager.openai.generate_hashtags(
+            normalized_topic,
+            tone=normalized_tone,
+            target_audience=normalized_audience
+        )
+        captions = self.api_manager.openai.generate_captions(
+            normalized_topic,
+            tone=normalized_tone,
+            target_audience=normalized_audience
+        )
+        pack = self.api_manager.openai.generate_full_content_pack(
+            normalized_topic,
+            tone=normalized_tone,
+            target_audience=normalized_audience,
+            script=script,
+            hashtags=hashtags,
+            captions=captions
+        )
+        caption_final = self._normalize_optional_text(pack.get("caption_final", ""), max_len=1200)
+        if not caption_final:
+            caption_final = self._normalize_optional_text(" ".join(captions) if isinstance(captions, list) else captions, max_len=1200)
+
+        scene_plan = self._build_scene_plan(script, normalized_duration, normalized_style)
+        voiceover_script = self._normalize_optional_text(pack.get("voiceover_script", ""), max_len=MAX_VOICEOVER_CHARS)
+        if not voiceover_script:
+            voiceover_script = "\n".join([scene.get("voiceover_text", "") for scene in scene_plan if scene.get("voiceover_text")])[:MAX_VOICEOVER_CHARS]
+
+        artifact_id = uuid4().hex
+        base_dir = UPLOAD_STORAGE_DIR / "generated"
+        base_dir.mkdir(parents=True, exist_ok=True)
+        subtitle_path = base_dir / f"{artifact_id}.srt"
+        audio_path = base_dir / f"{artifact_id}.mp3"
+        output_path = base_dir / f"{artifact_id}.mp4"
+
+        tts_result = self.tts_provider.synthesize(voiceover_script, normalized_voice, audio_path)
+        self.video_assembler.build_subtitles(scene_plan, normalized_duration, subtitle_path)
+        video_result = self.video_assembler.assemble(
+            duration_seconds=normalized_duration,
+            subtitle_path=subtitle_path,
+            output_path=output_path,
+            audio_path=audio_path if tts_result.get("status") == "success" else None
+        )
+
+        if video_result.get("status") == "success":
+            self._register_artifact(artifact_id, output_path)
+            mp4_url = f"/artifacts/{artifact_id}/download"
+            video_status = "ready"
+            video_message = "Faceless video generated successfully."
+        else:
+            mp4_url = ""
+            video_status = "not_generated"
+            missing = []
+            if tts_result.get("status") != "success":
+                missing.append(tts_result.get("message", "TTS unavailable"))
+            missing.append(video_result.get("message", "Video assembly unavailable"))
+            video_message = " ".join([str(part) for part in missing if part]).strip()
+
+        guidance = None
+        if tts_result.get("status") != "success":
+            guidance = (
+                "AI voiceover is unavailable. Set a valid TTS provider key (e.g., OPENAI_API_KEY) "
+                "to enable MP4 voice generation. Script and caption were still generated."
+            )
+
+        return {
+            "status": "success",
+            "mode": "auto_create_video",
+            "topic": normalized_topic,
+            "tone": normalized_tone,
+            "target_audience": normalized_audience,
+            "duration": normalized_duration,
+            "voice_preset": normalized_voice,
+            "style_preset": normalized_style,
+            "script": script,
+            "scene_plan": scene_plan,
+            "voiceover_script": voiceover_script,
+            "captions": captions,
+            "caption_final": caption_final,
+            "hashtags": hashtags,
+            "full_content_pack": pack,
+            "video": {
+                "status": video_status,
+                "message": video_message,
+                "artifact_id": artifact_id if mp4_url else "",
+                "download_url": mp4_url,
+                "format": "mp4",
+                "aspect_ratio": "9:16",
+                "subtitles_burned": video_result.get("status") == "success"
+            },
+            "tts": tts_result,
+            "guidance": guidance
+        }
 
     def run_from_media(
         self,
@@ -394,6 +798,56 @@ def run_pipeline():
             "status": "error",
             "message": "internal server error"
         }), 500
+
+
+@app.post("/auto-create-video")
+def auto_create_video():
+    try:
+        data = request.get_json(silent=True) or {}
+        topic = data.get("topic", "viral trends")
+        tone = data.get("tone", "balanced")
+        target_audience = data.get("target_audience", "general")
+        duration = data.get("duration", 45)
+        voice_preset = data.get("voice_preset", "female")
+        style_preset = data.get("style_preset", "educational")
+
+        if not isinstance(topic, str) or not topic.strip():
+            return jsonify({
+                "status": "error",
+                "message": "topic must be a non-empty string"
+            }), 400
+
+        result = engine.auto_create_video(
+            topic=topic,
+            tone=tone if isinstance(tone, str) else "balanced",
+            target_audience=target_audience if isinstance(target_audience, str) else "general",
+            duration=duration,
+            voice_preset=voice_preset if isinstance(voice_preset, str) else "female",
+            style_preset=style_preset if isinstance(style_preset, str) else "educational"
+        )
+        return jsonify(result), 200
+    except Exception:
+        logger.exception("Auto-create video failed")
+        return jsonify({
+            "status": "error",
+            "message": "internal server error"
+        }), 500
+
+
+@app.get("/artifacts/<artifact_id>/download")
+def download_artifact(artifact_id):
+    safe_id = str(artifact_id or "").strip().lower()
+    if not re.fullmatch(r"[a-f0-9]{32}", safe_id):
+        return jsonify({"status": "error", "message": "invalid artifact id"}), 400
+    path = engine._get_artifact_path(safe_id)
+    if path is None:
+        return jsonify({"status": "error", "message": "artifact not found"}), 404
+    return send_file(
+        path,
+        mimetype="video/mp4",
+        as_attachment=True,
+        download_name=f"auto-video-{safe_id}.mp4"
+    )
 
 
 @app.post("/run-from-media")
