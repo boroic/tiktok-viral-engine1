@@ -58,6 +58,11 @@ MAX_DIAGNOSTIC_DETAILS_LENGTH = 300
 MAX_ERROR_DETAILS_LENGTH = 500
 
 
+def env_flag_enabled(name: str):
+    """Return True only when env var is explicitly set to 'true' (case-insensitive)."""
+    return str(os.environ.get(name, "")).strip().lower() == "true"
+
+
 def sanitize_for_srt(text: str):
     normalized = re.sub(r"\s+", " ", str(text or "").strip())
     return normalized[:200]
@@ -602,7 +607,16 @@ class TikTokViralEngine:
         audio_path = base_dir / f"{artifact_id}.mp3"
         output_path = base_dir / f"{artifact_id}.mp4"
 
-        tts_result = self.tts_provider.synthesize(voiceover_script, normalized_voice, audio_path)
+        force_disable_tts = env_flag_enabled("DISABLE_TTS")
+        if force_disable_tts:
+            tts_result = {
+                "status": "unavailable",
+                "provider": self.tts_provider.provider_name,
+                "error_type": "tts_disabled",
+                "message": "Voiceover disabled via DISABLE_TTS=true."
+            }
+        else:
+            tts_result = self.tts_provider.synthesize(voiceover_script, normalized_voice, audio_path)
         self.video_assembler.build_subtitles(scene_plan, normalized_duration, subtitle_path)
         video_result = self.video_assembler.assemble(
             duration_seconds=normalized_duration,
@@ -615,7 +629,10 @@ class TikTokViralEngine:
             self._register_artifact(artifact_id, output_path)
             mp4_url = f"/artifacts/{artifact_id}/download"
             video_status = "ready"
-            video_message = "Faceless video generated successfully."
+            if tts_result.get("status") != "success":
+                video_message = "Voiceover disabled (no API credit). Generated silent video."
+            else:
+                video_message = "Faceless video generated successfully."
         else:
             mp4_url = ""
             video_status = "not_generated"
@@ -633,18 +650,25 @@ class TikTokViralEngine:
         if tts_result.get("status") != "success":
             if tts_result.get("error_type") == "missing_api_key":
                 guidance = (
-                    "AI voiceover is unavailable because OPENAI_API_KEY is missing. "
-                    "Set OPENAI_API_KEY to enable voice generation. Script and caption were still generated."
+                    "Voiceover is disabled due to missing API credit/key. "
+                    "Set OPENAI_API_KEY and ensure TTS access to enable voice generation. "
+                    "Script, scene plan, caption, and hashtags were still generated."
+                )
+            elif tts_result.get("error_type") == "tts_disabled":
+                guidance = (
+                    "Voiceover was explicitly disabled by DISABLE_TTS=true. "
+                    "Set DISABLE_TTS=false to re-enable TTS. "
+                    "Script, scene plan, caption, and hashtags were still generated."
                 )
             elif tts_result.get("error_type") == "rate_limited":
                 guidance = (
                     "AI voiceover hit TTS quota/rate-limit (HTTP 429). "
-                    "Retry later or increase quota. Script and caption were still generated."
+                    "Retry later or increase quota. Script, scene plan, caption, and hashtags were still generated."
                 )
             else:
                 guidance = (
                     "AI voiceover is unavailable. Verify OPENAI_API_KEY and TTS provider access. "
-                    "Script and caption were still generated."
+                    "Script, scene plan, caption, and hashtags were still generated."
                 )
 
         return {
