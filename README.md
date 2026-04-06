@@ -124,3 +124,21 @@ The web UI now includes a dedicated **Auto Create Video (Faceless MVP)** card wi
 - Buttons: **Auto Create Video**, **Download MP4**, **Copy Caption**
 
 Existing caption generation and media-based flows remain intact and backward compatible.
+
+## 🚂 Railway Deployment Notes (ffmpeg + Auto Create Video)
+
+- The repo keeps `nixpacks.toml` with `ffmpeg` and also includes root `apt.txt` with `ffmpeg` as a safe fallback when builder behavior ignores nixpacks.
+- This is intentionally minimal and reversible for production reliability.
+
+### Verify on Railway (manual)
+
+1. Deploy latest `main` and open Railway build logs.
+2. Confirm ffmpeg installation appears from either nixpacks (`nixPkgs = ["ffmpeg"]`) or apt package installation (`apt.txt`).
+3. Ensure `OPENAI_API_KEY` is set in Railway variables, then call `POST /auto-create-video`.
+4. Confirm response includes `video.status: "ready"` and a non-empty `video.download_url` when ffmpeg and TTS are available.
+5. If TTS is limited, confirm response still includes `script`, `caption_final`, `hashtags`, `scene_plan`, and clearly reports `HTTP 429` in `tts.message`/`guidance`.
+
+### Rollback
+
+1. Revert the commit that introduced `apt.txt` and diagnostics wording changes.
+2. Redeploy on Railway.

@@ -53,6 +53,9 @@ SUPPORTED_VOICE_PRESETS = {"male", "female"}
 SUPPORTED_STYLE_PRESETS = {"educational", "storytelling", "checklist"}
 MAX_VOICEOVER_CHARS = 3000
 MAX_ARTIFACTS = int(os.environ.get("MAX_GENERATED_ARTIFACTS", "200"))
+MAX_TTS_DETAILS_LENGTH = 400
+MAX_DIAGNOSTIC_DETAILS_LENGTH = 300
+MAX_ERROR_DETAILS_LENGTH = 500
 
 
 def sanitize_for_srt(text: str):
@@ -69,6 +72,14 @@ def format_srt_timestamp(seconds_float: float):
     seconds = total_ms // 1000
     millis = total_ms % 1000
     return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+
+
+def truncate_diagnostic_text(value: str, limit: int):
+    """Safely stringify any value (including None) and truncate diagnostic text."""
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]} ...[truncated]"
 
 
 class BaseTTSProvider:
@@ -90,6 +101,7 @@ class OpenAITTSProvider(BaseTTSProvider):
             return {
                 "status": "unavailable",
                 "provider": self.provider_name,
+                "error_type": "missing_api_key",
                 "message": "OPENAI_API_KEY is missing. Add it to enable AI voiceover."
             }
 
@@ -129,16 +141,25 @@ class OpenAITTSProvider(BaseTTSProvider):
                 body = exc.read().decode("utf-8", errors="ignore")
             except Exception:
                 body = ""
+            if exc.code == 429:
+                message = "TTS quota/rate-limit reached (HTTP 429)."
+                error_type = "rate_limited"
+            else:
+                message = f"TTS request failed with HTTP {exc.code}."
+                error_type = "http_error"
             return {
                 "status": "error",
                 "provider": self.provider_name,
-                "message": f"TTS request failed with HTTP {exc.code}.",
-                "details": body[:400]
+                "error_type": error_type,
+                "message": message,
+                "http_status": exc.code,
+                "details": body[:MAX_TTS_DETAILS_LENGTH]
             }
         except Exception as exc:
             return {
                 "status": "error",
                 "provider": self.provider_name,
+                "error_type": "exception",
                 "message": f"TTS generation failed: {exc}"
             }
 
@@ -147,8 +168,48 @@ class FacelessVideoAssembler:
     def __init__(self):
         self.ffmpeg = shutil.which("ffmpeg")
 
+    def ffmpeg_diagnostics(self):
+        """Check ffmpeg presence/runtime and return lightweight diagnostics."""
+        if not self.ffmpeg:
+            return {
+                "available": False,
+                "path": "",
+                "message": "ffmpeg binary not found on PATH."
+            }
+        try:
+            proc = subprocess.run(
+                [self.ffmpeg, "-version"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5
+            )
+            if proc.returncode != 0:
+                return {
+                    "available": False,
+                    "path": self.ffmpeg,
+                    "message": "ffmpeg binary found but not runnable.",
+                    "details": truncate_diagnostic_text((proc.stderr or proc.stdout or ""), MAX_DIAGNOSTIC_DETAILS_LENGTH)
+                }
+            stdout_text = (proc.stdout or "").strip()
+            lines = stdout_text.splitlines()
+            if not lines:
+                lines = [""]
+            first_line = lines[0]
+            return {
+                "available": True,
+                "path": self.ffmpeg,
+                "version": first_line
+            }
+        except Exception as exc:
+            return {
+                "available": False,
+                "path": self.ffmpeg or "",
+                "message": f"ffmpeg check failed: {exc}"
+            }
+
     def ffmpeg_available(self):
-        return bool(self.ffmpeg)
+        return bool(self.ffmpeg_diagnostics().get("available"))
 
     def _escape_subtitle_filter_path(self, subtitle_path: Path):
         raw = str(subtitle_path.resolve())
@@ -182,10 +243,12 @@ class FacelessVideoAssembler:
         destination.write_text("\n".join(lines), encoding="utf-8")
 
     def assemble(self, duration_seconds: int, subtitle_path: Path, output_path: Path, audio_path: Path = None):
-        if not self.ffmpeg_available():
+        ffmpeg_diag = self.ffmpeg_diagnostics()
+        if not ffmpeg_diag.get("available"):
             return {
                 "status": "unavailable",
-                "message": "ffmpeg is not installed in this environment. Install ffmpeg to export MP4."
+                "message": "ffmpeg is missing or not runnable in this environment. Ensure deployment installs ffmpeg.",
+                "diagnostics": ffmpeg_diag
             }
 
         safe_subtitle_path = self._escape_subtitle_filter_path(subtitle_path)
@@ -217,16 +280,19 @@ class FacelessVideoAssembler:
                 return {
                     "status": "error",
                     "message": "Video assembly failed.",
-                    "details": (proc.stderr or proc.stdout or "")[-500:]
+                    "diagnostics": ffmpeg_diag,
+                    "details": truncate_diagnostic_text((proc.stderr or proc.stdout or ""), MAX_ERROR_DETAILS_LENGTH)
                 }
             return {
                 "status": "success",
-                "message": "MP4 generated successfully."
+                "message": "MP4 generated successfully.",
+                "diagnostics": ffmpeg_diag
             }
         except Exception as exc:
             return {
                 "status": "error",
-                "message": f"Video assembly failed: {exc}"
+                "message": f"Video assembly failed: {exc}",
+                "diagnostics": ffmpeg_diag
             }
 
 
@@ -565,10 +631,21 @@ class TikTokViralEngine:
 
         guidance = None
         if tts_result.get("status") != "success":
-            guidance = (
-                "AI voiceover is unavailable. Set a valid TTS provider key (e.g., OPENAI_API_KEY) "
-                "to enable MP4 voice generation. Script and caption were still generated."
-            )
+            if tts_result.get("error_type") == "missing_api_key":
+                guidance = (
+                    "AI voiceover is unavailable because OPENAI_API_KEY is missing. "
+                    "Set OPENAI_API_KEY to enable voice generation. Script and caption were still generated."
+                )
+            elif tts_result.get("error_type") == "rate_limited":
+                guidance = (
+                    "AI voiceover hit TTS quota/rate-limit (HTTP 429). "
+                    "Retry later or increase quota. Script and caption were still generated."
+                )
+            else:
+                guidance = (
+                    "AI voiceover is unavailable. Verify OPENAI_API_KEY and TTS provider access. "
+                    "Script and caption were still generated."
+                )
 
         return {
             "status": "success",
@@ -593,7 +670,8 @@ class TikTokViralEngine:
                 "download_url": mp4_url,
                 "format": "mp4",
                 "aspect_ratio": "9:16",
-                "subtitles_burned": video_result.get("status") == "success"
+                "subtitles_burned": video_result.get("status") == "success",
+                "diagnostics": video_result.get("diagnostics", {})
             },
             "tts": tts_result,
             "guidance": guidance
