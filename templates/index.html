@@ -284,11 +284,23 @@
 
   <div class="row">
     <input id="topic" type="text" placeholder="e.g. fitness motivation" />
+    <select id="tone">
+      <option value="balanced" selected>Tone: Balanced</option>
+      <option value="educational">Tone: Educational</option>
+      <option value="fun">Tone: Fun</option>
+      <option value="bold">Tone: Bold</option>
+    </select>
+    <input id="targetAudience" type="text" placeholder="Target audience (e.g. busy parents)" />
     <button id="runBtn" onclick="runPipeline()">▶ Run</button>
   </div>
   <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
     <input id="mediaInput" type="file" accept="image/*,video/*" multiple />
     <button id="runMediaBtn" onclick="runFromMedia()">🖼️ Run from Media</button>
+  </div>
+  <div style="margin-top:10px;display:grid;grid-template-columns:1fr;gap:8px;">
+    <input id="ocrText" type="text" placeholder="Optional OCR text from media" />
+    <input id="transcriptText" type="text" placeholder="Optional transcript text from media" />
+    <input id="keyframeSummary" type="text" placeholder="Optional keyframe summary from media" />
   </div>
 
   <!-- Loading indicator -->
@@ -777,6 +789,8 @@
 
     async function runPipeline() {
       var topic = document.getElementById("topic").value.trim() || "viral_trends";
+      var tone = document.getElementById("tone").value || "balanced";
+      var targetAudience = document.getElementById("targetAudience").value.trim() || "general";
       _lastMediaResults = null;
       hideError();
       document.getElementById("results").className = "";
@@ -786,7 +800,11 @@
         var response = await fetchJsonWithRetry("/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ topic: topic })
+          body: JSON.stringify({
+            topic: topic,
+            tone: tone,
+            target_audience: targetAudience
+          })
         }, "pipeline run");
         var res = response.res;
         var data = response.data;
@@ -807,6 +825,11 @@
     async function runFromMedia() {
       const mediaInput = document.getElementById("mediaInput");
       const files = Array.prototype.slice.call(mediaInput.files || []);
+      var tone = document.getElementById("tone").value || "balanced";
+      var targetAudience = document.getElementById("targetAudience").value.trim() || "general";
+      var ocrText = document.getElementById("ocrText").value.trim();
+      var transcriptText = document.getElementById("transcriptText").value.trim();
+      var keyframeSummary = document.getElementById("keyframeSummary").value.trim();
       _lastMediaResults = null;
       hideError();
       document.getElementById("results").className = "";
@@ -821,6 +844,11 @@
 
       try {
         const form = new FormData();
+        form.append("tone", tone);
+        form.append("target_audience", targetAudience);
+        if (ocrText) form.append("ocr_text", ocrText);
+        if (transcriptText) form.append("transcript_text", transcriptText);
+        if (keyframeSummary) form.append("keyframe_summary", keyframeSummary);
         files.forEach(function(file) {
           form.append("media", file);
         });

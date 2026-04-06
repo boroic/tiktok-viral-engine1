@@ -72,16 +72,37 @@ class TikTokViralEngine:
             "stored_path": str(media_path)
         }
 
-    def run_full_pipeline(self, topic: str = "viral_trends"):
+    def run_full_pipeline(
+        self,
+        topic: str = "viral_trends",
+        tone: str = "balanced",
+        target_audience: str = "general",
+        media_grounding=None
+    ):
         logger.info(f"Running pipeline for topic={topic}")
 
         health = self.api_manager.health_check()
         trends = self.trend_detector.fetch_trends()
         sounds = self.sound_analyzer.analyze_trending_sounds()
 
-        script = self.api_manager.openai.generate_script(topic)
-        hashtags = self.api_manager.openai.generate_hashtags(topic)
-        captions = self.api_manager.openai.generate_captions(topic)
+        script = self.api_manager.openai.generate_script(
+            topic,
+            tone=tone,
+            target_audience=target_audience,
+            media_grounding=media_grounding
+        )
+        hashtags = self.api_manager.openai.generate_hashtags(
+            topic,
+            tone=tone,
+            target_audience=target_audience,
+            media_grounding=media_grounding
+        )
+        captions = self.api_manager.openai.generate_captions(
+            topic,
+            tone=tone,
+            target_audience=target_audience,
+            media_grounding=media_grounding
+        )
 
         analytics = self.video_analytics.predict_performance(script)
 
@@ -92,6 +113,8 @@ class TikTokViralEngine:
             "status": "success",
             "api_health": health,
             "topic": topic,
+            "tone": tone,
+            "target_audience": target_audience,
             "script": script,
             "hashtags": hashtags,
             "captions": captions,
@@ -115,10 +138,49 @@ class TikTokViralEngine:
             while len(self.media_result_cache) > self.media_result_cache_size:
                 self.media_result_cache.popitem(last=False)
 
-    def run_from_media(self, media_path: Path, media_hash: str = ""):
+    def _normalize_optional_text(self, value, max_len=1200):
+        if not isinstance(value, str):
+            return ""
+        compact = " ".join(value.split()).strip()
+        return compact[:max_len]
+
+    def run_from_media(
+        self,
+        media_path: Path,
+        media_hash: str = "",
+        tone: str = "balanced",
+        target_audience: str = "general",
+        media_grounding=None
+    ):
         media_context = self.analyze_media_context(media_path)
         topic = media_context.get("topic_hint", "viral content")
-        cache_key = f"{media_hash}:{topic}" if media_hash else ""
+        normalized_grounding = {}
+        if isinstance(media_grounding, dict):
+            normalized_grounding = {
+                "ocr_text": self._normalize_optional_text(media_grounding.get("ocr_text", "")),
+                "transcript_text": self._normalize_optional_text(media_grounding.get("transcript_text", "")),
+                "keyframe_summary": self._normalize_optional_text(media_grounding.get("keyframe_summary", ""))
+            }
+
+        # Ground topic in available media-derived text while gracefully falling back.
+        topic_candidates = [
+            normalized_grounding.get("keyframe_summary", ""),
+            normalized_grounding.get("ocr_text", ""),
+            normalized_grounding.get("transcript_text", ""),
+            topic
+        ]
+        for candidate in topic_candidates:
+            words = [w for w in str(candidate).split() if w]
+            if words:
+                topic = " ".join(words[: self.max_topic_words])
+                break
+
+        grounding_key = "|".join([
+            normalized_grounding.get("ocr_text", ""),
+            normalized_grounding.get("transcript_text", ""),
+            normalized_grounding.get("keyframe_summary", "")
+        ])
+        cache_key = f"{media_hash}:{topic}:{tone}:{target_audience}:{grounding_key}" if media_hash else ""
 
         if cache_key:
             cached = self._get_cached_media_result(cache_key)
@@ -128,10 +190,16 @@ class TikTokViralEngine:
                 cached["cache"] = {"hit": True}
                 return cached
 
-        result = self.run_full_pipeline(topic=topic)
+        result = self.run_full_pipeline(
+            topic=topic,
+            tone=tone,
+            target_audience=target_audience,
+            media_grounding=normalized_grounding
+        )
         if cache_key:
             self._set_cached_media_result(cache_key, result)
         result["media_context"] = media_context
+        result["media_grounding"] = normalized_grounding
         result["media_hash"] = media_hash
         result["cache"] = {"hit": False}
         return result
@@ -267,14 +335,24 @@ def run_pipeline():
     try:
         data = request.get_json(silent=True) or {}
         topic = data.get("topic", "viral_trends")
+        tone = data.get("tone", "balanced")
+        target_audience = data.get("target_audience", "general")
 
         if not isinstance(topic, str) or not topic.strip():
             return jsonify({
                 "status": "error",
                 "message": "topic must be a non-empty string"
             }), 400
+        if not isinstance(tone, str):
+            tone = "balanced"
+        if not isinstance(target_audience, str):
+            target_audience = "general"
 
-        result = engine.run_full_pipeline(topic=topic.strip())
+        result = engine.run_full_pipeline(
+            topic=topic.strip(),
+            tone=tone.strip() or "balanced",
+            target_audience=target_audience.strip() or "general"
+        )
         return jsonify(result), 200
 
     except Exception:
@@ -301,6 +379,19 @@ def run_pipeline_from_media():
                 "status": "error",
                 "message": f"too many files (max {MAX_MEDIA_FILES})"
             }), 400
+
+        tone = request.form.get("tone", "balanced")
+        target_audience = request.form.get("target_audience", "general")
+        if not isinstance(tone, str):
+            tone = "balanced"
+        if not isinstance(target_audience, str):
+            target_audience = "general"
+
+        media_grounding = {
+            "ocr_text": request.form.get("ocr_text", ""),
+            "transcript_text": request.form.get("transcript_text", ""),
+            "keyframe_summary": request.form.get("keyframe_summary", "")
+        }
 
         validation_errors = []
         normalized_uploads = []
@@ -357,7 +448,15 @@ def run_pipeline_from_media():
                         f"{filename}: file too large (max {format_bytes(MAX_MEDIA_FILE_BYTES)})"
                     ]
                 }), 400
-            results.append(engine.run_from_media(stored_path, media_hash=media_hash))
+            results.append(
+                engine.run_from_media(
+                    stored_path,
+                    media_hash=media_hash,
+                    tone=tone.strip() or "balanced",
+                    target_audience=target_audience.strip() or "general",
+                    media_grounding=media_grounding
+                )
+            )
 
         if len(results) == 1:
             return jsonify(results[0]), 200
