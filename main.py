@@ -61,7 +61,7 @@ def sanitize_for_srt(text: str):
 
 
 def format_srt_timestamp(seconds_float: float):
-    total_ms = max(0, int(round(seconds_float * 1000)))
+    total_ms = max(0, int(round(seconds_float * 1_000)))
     hours = total_ms // 3_600_000
     total_ms %= 3_600_000
     minutes = total_ms // 60_000
@@ -150,6 +150,16 @@ class FacelessVideoAssembler:
     def ffmpeg_available(self):
         return bool(self.ffmpeg)
 
+    def _escape_subtitle_filter_path(self, subtitle_path: Path):
+        raw = str(subtitle_path.resolve())
+        escaped = raw.replace("\\", "\\\\")
+        escaped = escaped.replace(":", r"\:")
+        escaped = escaped.replace("'", r"\'")
+        escaped = escaped.replace(",", r"\,")
+        escaped = escaped.replace("[", r"\[")
+        escaped = escaped.replace("]", r"\]")
+        return escaped
+
     def build_subtitles(self, scene_plan, duration_seconds: int, destination: Path):
         lines = []
         safe_scenes = scene_plan if isinstance(scene_plan, list) and scene_plan else []
@@ -178,8 +188,9 @@ class FacelessVideoAssembler:
                 "message": "ffmpeg is not installed in this environment. Install ffmpeg to export MP4."
             }
 
+        safe_subtitle_path = self._escape_subtitle_filter_path(subtitle_path)
         filter_expr = (
-            f"subtitles={str(subtitle_path)}:force_style="
+            f"subtitles={safe_subtitle_path}:force_style="
             "'Fontsize=44,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,MarginV=150'"
         )
         cmd = [
@@ -447,7 +458,7 @@ class TikTokViralEngine:
             self.generated_artifacts[artifact_id] = str(output_path)
             self.generated_artifacts.move_to_end(artifact_id)
             while len(self.generated_artifacts) > MAX_ARTIFACTS:
-                _old_id, old_path_str = self.generated_artifacts.popitem(last=False)
+                _, old_path_str = self.generated_artifacts.popitem(last=False)
                 old_path = Path(old_path_str)
                 if old_path.exists():
                     try:
@@ -510,7 +521,13 @@ class TikTokViralEngine:
         scene_plan = self._build_scene_plan(script, normalized_duration, normalized_style)
         voiceover_script = self._normalize_optional_text(pack.get("voiceover_script", ""), max_len=MAX_VOICEOVER_CHARS)
         if not voiceover_script:
-            voiceover_script = "\n".join([scene.get("voiceover_text", "") for scene in scene_plan if scene.get("voiceover_text")])[:MAX_VOICEOVER_CHARS]
+            voiceover_lines = []
+            for scene in scene_plan:
+                text_line = scene.get("voiceover_text", "")
+                if text_line:
+                    voiceover_lines.append(text_line)
+            voiceover_script = "\n".join(voiceover_lines)
+            voiceover_script = voiceover_script[:MAX_VOICEOVER_CHARS]
 
         artifact_id = uuid4().hex
         base_dir = UPLOAD_STORAGE_DIR / "generated"

@@ -366,14 +366,15 @@
     <button id="regenerateBtn" class="secondary" onclick="regenerate()">↻ Regenerate</button>
   </div>
   <div class="card" style="margin-top:12px;">
-    <div class="card-header">
-      <div class="card-title">🎬 Auto Create Video (Faceless MVP)</div>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <button id="autoCreateVideoBtn" class="primary" onclick="runAutoCreateVideo()">Auto Create Video</button>
-        <button id="downloadMp4Btn" class="secondary" onclick="downloadMp4()" disabled>Download MP4</button>
-        <button id="copyCaptionBtn" class="secondary" onclick="copyAutoCaption()">Copy Caption</button>
+      <div class="card-header">
+        <div class="card-title">🎬 Auto Create Video (Faceless MVP)</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button id="autoCreateVideoBtn" class="primary" onclick="runAutoCreateVideo()">Auto Create Video</button>
+          <button id="downloadMp4Btn" class="secondary" onclick="downloadMp4()" disabled>Download MP4</button>
+          <button id="copyCaptionBtn" class="secondary" onclick="copyAutoCaption()">Copy Caption</button>
+          <span class="copy-feedback" id="copyFeedbackAutoCaption">Copied!</span>
+        </div>
       </div>
-    </div>
     <div class="auto-grid">
       <select id="autoDuration">
         <option value="30">Duration: 30s</option>
@@ -745,10 +746,7 @@
       var sceneHtml = "";
       var scenes = Array.isArray(data.scene_plan) ? data.scene_plan : [];
       scenes.forEach(function(scene) {
-        sceneHtml += "<div class=\"scene-item\"><strong>Scene " + escHtml(String(scene.scene || "")) +
-          " (" + escHtml(String(scene.start_second || 0)) + "s-" + escHtml(String(scene.end_second || 0)) + "s)</strong><br/>" +
-          escHtml(String(scene.visual_template || "")) + "<br/>" +
-          "<em>" + escHtml(String(scene.on_screen_text || "")) + "</em></div>";
+        sceneHtml += `<div class="scene-item"><strong>Scene ${escHtml(String(scene.scene || ""))} (${escHtml(String(scene.start_second || 0))}s-${escHtml(String(scene.end_second || 0))}s)</strong><br/>${escHtml(String(scene.visual_template || ""))}<br/><em>${escHtml(String(scene.on_screen_text || ""))}</em></div>`;
       });
       var hashtagsText = getHashtagText(data.hashtags);
       body.innerHTML =
@@ -758,7 +756,7 @@
         "<strong>Hashtags:</strong><br/>" + escHtml(String(hashtagsText || "")) + "<br/><br/>" +
         "<strong>Scene Plan:</strong><div class=\"scene-list\">" + sceneHtml + "</div>";
       guide.textContent = data.guidance ? String(data.guidance) : "";
-      downloadBtn.disabled = !((data.video && data.video.download_url) || "");
+      downloadBtn.disabled = !(data.video && data.video.download_url);
     }
 
     function ensureArray(value) {
@@ -1187,10 +1185,15 @@
 
     function copyAutoCaption() {
       if (_lastAutoVideo && _lastAutoVideo.caption_final) {
+        var autoFeedback = document.getElementById("copyFeedbackAutoCaption");
         if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(String(_lastAutoVideo.caption_final));
+          navigator.clipboard.writeText(String(_lastAutoVideo.caption_final)).then(function() {
+            flashFeedback(autoFeedback);
+          }).catch(function() {
+            fallbackCopy(String(_lastAutoVideo.caption_final), autoFeedback);
+          });
         } else {
-          fallbackCopy(String(_lastAutoVideo.caption_final), document.getElementById("copyFeedbackAll"));
+          fallbackCopy(String(_lastAutoVideo.caption_final), autoFeedback);
         }
         return;
       }
@@ -1199,7 +1202,14 @@
 
     function downloadMp4() {
       if (!_lastAutoVideo || !_lastAutoVideo.video || !_lastAutoVideo.video.download_url) return;
-      window.location.href = _lastAutoVideo.video.download_url;
+      var a = document.createElement("a");
+      a.href = _lastAutoVideo.video.download_url;
+      a.setAttribute("download", "");
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function() {
+        document.body.removeChild(a);
+      }, 100);
     }
 
     async function runPipeline(options) {
