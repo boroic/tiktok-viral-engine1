@@ -53,6 +53,9 @@ SUPPORTED_VOICE_PRESETS = {"male", "female"}
 SUPPORTED_STYLE_PRESETS = {"educational", "storytelling", "checklist"}
 MAX_VOICEOVER_CHARS = 3000
 MAX_ARTIFACTS = int(os.environ.get("MAX_GENERATED_ARTIFACTS", "200"))
+MAX_TTS_ERROR_DETAILS_LENGTH = 400
+MAX_DIAGNOSTIC_OUTPUT_LENGTH = 300
+MAX_ERROR_DETAILS_LENGTH = 500
 
 
 def sanitize_for_srt(text: str):
@@ -90,6 +93,7 @@ class OpenAITTSProvider(BaseTTSProvider):
             return {
                 "status": "unavailable",
                 "provider": self.provider_name,
+                "error_type": "missing_api_key",
                 "message": "OPENAI_API_KEY is missing. Add it to enable AI voiceover."
             }
 
@@ -131,19 +135,23 @@ class OpenAITTSProvider(BaseTTSProvider):
                 body = ""
             if exc.code == 429:
                 message = "TTS quota/rate-limit reached (HTTP 429)."
+                error_type = "rate_limited"
             else:
                 message = f"TTS request failed with HTTP {exc.code}."
+                error_type = "http_error"
             return {
                 "status": "error",
                 "provider": self.provider_name,
+                "error_type": error_type,
                 "message": message,
                 "http_status": exc.code,
-                "details": body[:400]
+                "details": body[:MAX_TTS_ERROR_DETAILS_LENGTH]
             }
         except Exception as exc:
             return {
                 "status": "error",
                 "provider": self.provider_name,
+                "error_type": "exception",
                 "message": f"TTS generation failed: {exc}"
             }
 
@@ -172,7 +180,7 @@ class FacelessVideoAssembler:
                     "available": False,
                     "path": self.ffmpeg,
                     "message": "ffmpeg binary found but not runnable.",
-                    "details": (proc.stderr or proc.stdout or "")[-300:]
+                    "details": (proc.stderr or proc.stdout or "")[-MAX_DIAGNOSTIC_OUTPUT_LENGTH:]
                 }
             first_line = ((proc.stdout or "").strip().splitlines() or [""])[0]
             return {
@@ -260,7 +268,7 @@ class FacelessVideoAssembler:
                     "status": "error",
                     "message": "Video assembly failed.",
                     "diagnostics": ffmpeg_diag,
-                    "details": (proc.stderr or proc.stdout or "")[-500:]
+                    "details": (proc.stderr or proc.stdout or "")[-MAX_ERROR_DETAILS_LENGTH:]
                 }
             return {
                 "status": "success",
@@ -610,12 +618,12 @@ class TikTokViralEngine:
 
         guidance = None
         if tts_result.get("status") != "success":
-            if tts_result.get("status") == "unavailable" and "OPENAI_API_KEY" in str(tts_result.get("message", "")):
+            if tts_result.get("error_type") == "missing_api_key":
                 guidance = (
                     "AI voiceover is unavailable because OPENAI_API_KEY is missing. "
                     "Set OPENAI_API_KEY to enable voice generation. Script and caption were still generated."
                 )
-            elif tts_result.get("http_status") == 429:
+            elif tts_result.get("error_type") == "rate_limited" or tts_result.get("http_status") == 429:
                 guidance = (
                     "AI voiceover hit TTS quota/rate-limit (HTTP 429). "
                     "Retry later or increase quota. Script and caption were still generated."
