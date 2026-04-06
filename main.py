@@ -86,13 +86,7 @@ class TikTokViralEngine:
         content_mode: str = CONTENT_MODE_CAPTION_ONLY
     ):
         logger.info(f"Running pipeline for topic={topic}")
-        normalized_mode = (
-            content_mode.strip().lower()
-            if isinstance(content_mode, str) and content_mode.strip()
-            else CONTENT_MODE_CAPTION_ONLY
-        )
-        if normalized_mode not in SUPPORTED_CONTENT_MODES:
-            normalized_mode = CONTENT_MODE_CAPTION_ONLY
+        normalized_mode = self._normalize_content_mode(content_mode)
 
         health = self.api_manager.health_check()
         trends = self.trend_detector.fetch_trends()
@@ -133,7 +127,7 @@ class TikTokViralEngine:
         seed = trends[0] if isinstance(trends, list) and len(trends) > 0 else topic
         influencers = self.influencer_finder.find_collaborators(seed)
 
-        return {
+        result = {
             "status": "success",
             "api_health": health,
             "topic": topic,
@@ -172,6 +166,14 @@ class TikTokViralEngine:
         compact = " ".join(value.split()).strip()
         return compact[:max_len]
 
+    def _normalize_content_mode(self, value):
+        if not isinstance(value, str):
+            return CONTENT_MODE_CAPTION_ONLY
+        normalized = value.strip().lower()
+        if normalized not in SUPPORTED_CONTENT_MODES:
+            return CONTENT_MODE_CAPTION_ONLY
+        return normalized
+
     def run_from_media(
         self,
         media_path: Path,
@@ -203,8 +205,9 @@ class TikTokViralEngine:
 
         grounding_key = "\x1f".join([normalized_grounding.get(field, "") for field in MEDIA_GROUNDING_FIELDS])
         grounding_fingerprint = hashlib.sha256(grounding_key.encode("utf-8")).hexdigest() if grounding_key else ""
+        normalized_mode = self._normalize_content_mode(content_mode)
         cache_key = (
-            f"{media_hash}:{topic}:{tone}:{target_audience}:{grounding_fingerprint}:{content_mode}"
+            "\x1f".join([media_hash, topic, tone, target_audience, grounding_fingerprint, normalized_mode])
             if media_hash else ""
         )
 
@@ -221,7 +224,7 @@ class TikTokViralEngine:
             tone=tone,
             target_audience=target_audience,
             media_grounding=normalized_grounding,
-            content_mode=content_mode
+            content_mode=normalized_mode
         )
         if cache_key:
             self._set_cached_media_result(cache_key, result)

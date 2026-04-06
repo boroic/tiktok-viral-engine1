@@ -330,8 +330,8 @@
   <p class="muted">Generate a ready-to-post caption in one click.</p>
   <div style="margin-bottom:12px;">
     <div class="mode-toggle" role="group" aria-label="Content mode">
-      <button id="modeCaptionOnlyBtn" class="active" onclick="setContentMode('caption_only')">Caption Only</button>
-      <button id="modeFullPackBtn" onclick="setContentMode('full_content_pack')">Full Content Pack</button>
+      <button id="modeCaptionOnlyBtn" class="active" aria-pressed="true" onclick="setContentMode('caption_only')">Caption Only</button>
+      <button id="modeFullPackBtn" aria-pressed="false" onclick="setContentMode('full_content_pack')">Full Content Pack</button>
     </div>
   </div>
 
@@ -488,6 +488,8 @@
       _contentMode = (mode === "full_content_pack") ? "full_content_pack" : "caption_only";
       document.getElementById("modeCaptionOnlyBtn").className = (_contentMode === "caption_only") ? "active" : "";
       document.getElementById("modeFullPackBtn").className = (_contentMode === "full_content_pack") ? "active" : "";
+      document.getElementById("modeCaptionOnlyBtn").setAttribute("aria-pressed", _contentMode === "caption_only" ? "true" : "false");
+      document.getElementById("modeFullPackBtn").setAttribute("aria-pressed", _contentMode === "full_content_pack" ? "true" : "false");
       document.getElementById("cardFullPack").style.display = (_contentMode === "full_content_pack") ? "" : "none";
     }
 
@@ -675,7 +677,7 @@
       document.getElementById("results").className = "visible";
     }
 
-    function asArray(value) {
+    function ensureArray(value) {
       if (Array.isArray(value)) return value;
       if (value === null || value === undefined) return [];
       return [value];
@@ -696,11 +698,11 @@
       var html = "";
       html += "<strong>Video Concept:</strong> " + escHtml(String(pack.video_concept || "")) + "<br/><br/>";
       html += "<strong>Hook Options:</strong><br/>";
-      asArray(pack.hook_options).slice(0, 3).forEach(function(hook, idx) {
+      ensureArray(pack.hook_options).slice(0, 3).forEach(function(hook, idx) {
         html += (idx + 1) + ". " + escHtml(String(hook || "")) + "<br/>";
       });
       html += "<br/><strong>Shot List:</strong><div class=\"scene-list\">";
-      asArray(pack.shot_list).forEach(function(scene) {
+      ensureArray(pack.shot_list).forEach(function(scene) {
         if (scene && typeof scene === "object") {
           html += "<div class=\"scene-item\"><strong>Scene " + escHtml(String(scene.scene || "")) + "</strong> (" + escHtml(String(scene.duration_seconds || "")) + ")<br/>" +
             escHtml(String(scene.shot || "")) + "<br/><em>" + escHtml(String(scene.purpose || "")) + "</em></div>";
@@ -709,7 +711,7 @@
         }
       });
       html += "</div><br/><strong>On-Screen Text:</strong><div class=\"scene-list\">";
-      asArray(pack.on_screen_text).forEach(function(item) {
+      ensureArray(pack.on_screen_text).forEach(function(item) {
         if (item && typeof item === "object") {
           html += "<div class=\"scene-item\"><strong>Scene " + escHtml(String(item.scene || "")) + ":</strong> " + escHtml(String(item.text || "")) + "</div>";
         } else {
@@ -718,14 +720,14 @@
       });
       html += "</div><br/><strong>Voiceover Script:</strong><br/>" + escHtml(String(pack.voiceover_script || "")) + "<br/><br/>";
       html += "<strong>Editing Notes:</strong><br/>";
-      asArray(pack.editing_notes).forEach(function(note, idx) {
+      ensureArray(pack.editing_notes).forEach(function(note, idx) {
         html += (idx + 1) + ". " + escHtml(String(note || "")) + "<br/>";
       });
       html += "<br/><strong>Caption Final:</strong><br/>" + escHtml(String(pack.caption_final || "")) + "<br/><br/>";
-      html += "<strong>Hashtags:</strong> " + escHtml(asArray(pack.hashtags).join(" ")) + "<br/><br/>";
+      html += "<strong>Hashtags:</strong> " + escHtml(ensureArray(pack.hashtags).join(" ")) + "<br/><br/>";
       html += "<strong>Thumbnail Text:</strong> " + escHtml(String(pack.thumbnail_text || "")) + "<br/><br/>";
       html += "<strong>CTA Variants:</strong><br/>";
-      asArray(pack.cta_variants).slice(0, 3).forEach(function(cta, idx) {
+      ensureArray(pack.cta_variants).slice(0, 3).forEach(function(cta, idx) {
         html += (idx + 1) + ". " + escHtml(String(cta || "")) + "<br/>";
       });
       body.innerHTML = html;
@@ -832,12 +834,12 @@
         lines.push("Video Concept: " + String(pack.video_concept || ""));
         lines.push("");
         lines.push("Hook Options:");
-        asArray(pack.hook_options).slice(0, 3).forEach(function(item, idx) {
+        ensureArray(pack.hook_options).slice(0, 3).forEach(function(item, idx) {
           lines.push((idx + 1) + ". " + String(item || ""));
         });
         lines.push("");
         lines.push("Shot List:");
-        asArray(pack.shot_list).forEach(function(scene) {
+        ensureArray(pack.shot_list).forEach(function(scene) {
           if (scene && typeof scene === "object") {
             lines.push(
               "- Scene " + String(scene.scene || "") +
@@ -851,7 +853,7 @@
         });
         lines.push("");
         lines.push("On-Screen Text:");
-        asArray(pack.on_screen_text).forEach(function(item) {
+        ensureArray(pack.on_screen_text).forEach(function(item) {
           if (item && typeof item === "object") {
             lines.push("- Scene " + String(item.scene || "") + ": " + String(item.text || ""));
           } else {
@@ -863,7 +865,7 @@
         lines.push(String(pack.voiceover_script || ""));
         lines.push("");
         lines.push("Editing Notes:");
-        asArray(pack.editing_notes).forEach(function(note, idx) {
+        ensureArray(pack.editing_notes).forEach(function(note, idx) {
           lines.push((idx + 1) + ". " + String(note || ""));
         });
         lines.push("");
@@ -871,13 +873,13 @@
         lines.push(String(pack.caption_final || ""));
         lines.push("");
         lines.push("Hashtags:");
-        lines.push(asArray(pack.hashtags).join(" "));
+        lines.push(ensureArray(pack.hashtags).join(" "));
         lines.push("");
         lines.push("Thumbnail Text:");
         lines.push(String(pack.thumbnail_text || ""));
         lines.push("");
         lines.push("CTA Variants:");
-        asArray(pack.cta_variants).slice(0, 3).forEach(function(cta, idx) {
+        ensureArray(pack.cta_variants).slice(0, 3).forEach(function(cta, idx) {
           lines.push((idx + 1) + ". " + String(cta || ""));
         });
       }

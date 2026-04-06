@@ -194,12 +194,14 @@ class ScriptGenerator:
             ]
 
         selected_hook = self._pick_variant(hook_options, f"pack_hook:{variant_key}")
-        effective_script = script if isinstance(script, dict) else self.generate_script(
-            normalized_topic,
-            tone=tone,
-            target_audience=target_audience,
-            media_grounding=media_grounding
-        )
+        effective_script = script if isinstance(script, dict) else {}
+        if not isinstance(effective_script.get("body"), (list, str)) or not isinstance(effective_script.get("cta"), str):
+            effective_script = self.generate_script(
+                normalized_topic,
+                tone=tone,
+                target_audience=target_audience,
+                media_grounding=media_grounding
+            )
 
         shot_list = [
             {
@@ -281,7 +283,7 @@ class ScriptGenerator:
         if isinstance(captions, list) and captions:
             caption_final = self._sanitize_text(captions[0], max_len=260)
         if not caption_final:
-            caption_final = f"{selected_hook} {cta_variants[0]}"
+            caption_final = self._sanitize_text(f"{selected_hook} {cta_variants[0]}", max_len=260)
         tags_line = " ".join([self._sanitize_text(tag, max_len=36) for tag in base_hashtags if tag]).strip()
         if tags_line:
             caption_final = (caption_final + "\n\n" + tags_line).strip()
