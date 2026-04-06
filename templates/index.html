@@ -296,7 +296,7 @@
 </head>
 <body>
   <h1>🚀 TikTok Viral Engine</h1>
-  <p class="muted">Simple mode: generate a ready-to-post caption in one click.</p>
+  <p class="muted">Generate a ready-to-post caption in one click.</p>
 
   <div class="row">
     <input id="topic" type="text" placeholder="e.g. fitness motivation" />
@@ -672,8 +672,8 @@
     function normalizeHashtag(tag) {
       var t = String(tag || "").trim();
       if (!t) return "";
-      var normalized = (t.charAt(0) === "#" ? t : ("#" + t)).replace(/\s+/g, "");
-      var content = normalized.replace(/^#+/, "").trim();
+      var withoutHashes = t.replace(/^#+/, "");
+      var content = withoutHashes.replace(/\s+/g, "").trim();
       if (!content) return "";
       return "#" + content;
     }
@@ -896,6 +896,7 @@
       var topic = document.getElementById("topic").value.trim() || DEFAULT_TOPIC;
       var tone = document.getElementById("tone").value || "balanced";
       var targetAudience = document.getElementById("targetAudience").value.trim() || DEFAULT_TARGET_AUDIENCE;
+      var ok = false;
       _lastRunMode = "topic";
       _lastMediaResults = null;
       hideError();
@@ -918,20 +919,19 @@
         if (!res.ok) {
           var msg = (data && data.message) ? data.message : JSON.stringify(data, null, 2);
           showError("Error " + res.status + ": " + msg, data && data.errors);
-          return false;
         } else {
           renderResults(data);
           if (options.copyAfterGenerate) {
             copySection("readyCaption", "copyFeedbackReadyCaption");
           }
-          return true;
+          ok = true;
         }
       } catch (e) {
         showError("Network error: " + e.message);
-        return false;
       } finally {
         setLoading(false, "");
       }
+      return ok;
     }
 
     async function runFromMedia(options) {
@@ -943,6 +943,7 @@
       var ocrText = document.getElementById("ocrText").value.trim();
       var transcriptText = document.getElementById("transcriptText").value.trim();
       var keyframeSummary = document.getElementById("keyframeSummary").value.trim();
+      var ok = false;
       _lastMediaResults = null;
       hideError();
       document.getElementById("results").className = "";
@@ -974,7 +975,6 @@
         if (!res.ok) {
           const msg = (data && data.message) ? data.message : JSON.stringify(data, null, 2);
           showError("Error " + res.status + ": " + msg, data && data.errors);
-          return false;
         } else {
           var primary = (data && Array.isArray(data.results) && data.results.length > 0)
             ? data.results[0]
@@ -993,23 +993,25 @@
           if (options.copyAfterGenerate) {
             copySection("readyCaption", "copyFeedbackReadyCaption");
           }
-          return true;
+          ok = true;
         }
       } catch (e) {
         showError("Network error: " + e.message);
-        return false;
       } finally {
         setLoading(false, "");
       }
+      return ok;
     }
 
     async function generateAndCopyCaption() {
       var hasMedia = hasMediaFiles();
+      var succeeded = false;
       if (hasMedia) {
-        await runFromMedia({ copyAfterGenerate: true });
+        succeeded = await runFromMedia({ copyAfterGenerate: true });
       } else {
-        await runPipeline({ copyAfterGenerate: true });
+        succeeded = await runPipeline({ copyAfterGenerate: true });
       }
+      if (!succeeded) return;
     }
 
     async function regenerate() {
