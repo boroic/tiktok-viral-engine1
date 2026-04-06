@@ -74,7 +74,7 @@ def format_srt_timestamp(seconds_float: float):
     return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
 
 
-def truncate_output(value: str, limit: int):
+def truncate_diagnostic_text(value: str, limit: int):
     """Safely stringify any value (including None) and truncate diagnostic text."""
     text = str(value or "")
     if len(text) <= limit:
@@ -189,10 +189,12 @@ class FacelessVideoAssembler:
                     "available": False,
                     "path": self.ffmpeg,
                     "message": "ffmpeg binary found but not runnable.",
-                    "details": truncate_output((proc.stderr or proc.stdout or ""), MAX_DIAGNOSTIC_DETAILS_LENGTH)
+                    "details": truncate_diagnostic_text((proc.stderr or proc.stdout or ""), MAX_DIAGNOSTIC_DETAILS_LENGTH)
                 }
             stdout_text = (proc.stdout or "").strip()
-            lines = stdout_text.splitlines() or [""]
+            lines = stdout_text.splitlines()
+            if not lines:
+                lines = [""]
             first_line = lines[0]
             return {
                 "available": True,
@@ -279,7 +281,7 @@ class FacelessVideoAssembler:
                     "status": "error",
                     "message": "Video assembly failed.",
                     "diagnostics": ffmpeg_diag,
-                    "details": truncate_output((proc.stderr or proc.stdout or ""), MAX_ERROR_DETAILS_LENGTH)
+                    "details": truncate_diagnostic_text((proc.stderr or proc.stdout or ""), MAX_ERROR_DETAILS_LENGTH)
                 }
             return {
                 "status": "success",
