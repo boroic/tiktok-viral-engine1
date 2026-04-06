@@ -173,8 +173,9 @@ class TikTokViralEngine:
                 topic = " ".join(words[: self.max_topic_words])
                 break
 
-        grounding_key = "|".join([normalized_grounding.get(field, "") for field in MEDIA_GROUNDING_FIELDS])
-        cache_key = f"{media_hash}:{topic}:{tone}:{target_audience}:{grounding_key}" if media_hash else ""
+        grounding_key = "\x1f".join([normalized_grounding.get(field, "") for field in MEDIA_GROUNDING_FIELDS])
+        grounding_fingerprint = hashlib.sha256(grounding_key.encode("utf-8")).hexdigest() if grounding_key else ""
+        cache_key = f"{media_hash}:{topic}:{tone}:{target_audience}:{grounding_fingerprint}" if media_hash else ""
 
         if cache_key:
             cached = self._get_cached_media_result(cache_key)
