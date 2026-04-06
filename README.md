@@ -87,7 +87,11 @@ Generates a faceless 9:16 TikTok-ready package with:
 - exported MP4 download URL
 - caption_final + hashtags
 
-If external API keys are missing, the endpoint fails gracefully by returning script/caption outputs and clear guidance while marking video as not generated.
+No-cost mode:
+- If `OPENAI_API_KEY` is missing, or TTS fails, generation continues without voiceover.
+- If `DISABLE_TTS=true`, voiceover is always skipped (forced no-voice mode).
+- If ffmpeg is available, the endpoint still exports a silent MP4 with text overlays.
+- Script/scene plan/caption/hashtags are still returned in all these cases.
 
 ```bash
 curl -X POST http://localhost:8080/auto-create-video \
@@ -134,9 +138,10 @@ Existing caption generation and media-based flows remain intact and backward com
 
 1. Deploy latest `main` and open Railway build logs.
 2. Confirm ffmpeg installation appears from either nixpacks (`nixPkgs = ["ffmpeg"]`) or apt package installation (`apt.txt`).
-3. Ensure `OPENAI_API_KEY` is set in Railway variables, then call `POST /auto-create-video`.
-4. Confirm response includes `video.status: "ready"` and a non-empty `video.download_url` when ffmpeg and TTS are available.
-5. If TTS is limited, confirm response still includes `script`, `caption_final`, `hashtags`, `scene_plan`, and clearly reports `HTTP 429` in `tts.message`/`guidance`.
+3. Optionally set `DISABLE_TTS=true` to force no-voice mode.
+4. Call `POST /auto-create-video` with or without `OPENAI_API_KEY`.
+5. Confirm response includes `script`, `caption_final`, `hashtags`, and `scene_plan` even if TTS is unavailable.
+6. If ffmpeg is available, confirm `video.status: "ready"` and non-empty `video.download_url` for a silent MP4.
 
 ### Rollback
 

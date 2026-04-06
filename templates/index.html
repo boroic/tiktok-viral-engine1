@@ -1370,7 +1370,7 @@
       _lastMediaResults = null;
       hideError();
       document.getElementById("results").className = "";
-      setLoading(true, topic, null, "Generating script, scene plan, voiceover, and video...");
+      setLoading(true, topic, null, "Generating script, scene plan, and video...");
       try {
         var response = await fetchJsonWithRetry("/auto-create-video", {
           method: "POST",
