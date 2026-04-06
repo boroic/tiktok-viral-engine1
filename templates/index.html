@@ -297,10 +297,13 @@
     <input id="mediaInput" type="file" accept="image/*,video/*" multiple />
     <button id="runMediaBtn" onclick="runFromMedia()">🖼️ Run from Media</button>
   </div>
+  <div class="muted" style="margin-top:6px;">
+    Manual fields below are optional overrides for auto-extracted OCR/transcript/keyframe signals.
+  </div>
   <div style="margin-top:10px;display:grid;grid-template-columns:1fr;gap:8px;">
-    <input id="ocrText" type="text" placeholder="Optional OCR text from media" />
-    <input id="transcriptText" type="text" placeholder="Optional transcript text from media" />
-    <input id="keyframeSummary" type="text" placeholder="Optional keyframe summary from media" />
+    <input id="ocrText" type="text" placeholder="Optional override: OCR text from media" />
+    <input id="transcriptText" type="text" placeholder="Optional override: transcript text from media" />
+    <input id="keyframeSummary" type="text" placeholder="Optional override: keyframe summary from media" />
   </div>
 
   <!-- Loading indicator -->
@@ -698,11 +701,15 @@
             setProgress(percent, "Uploading " + files.length + " file(s)...");
           };
 
+          xhr.upload.onload = function() {
+            setProgress(null, "Upload complete. Extracting OCR/transcript/keyframe signals...");
+          };
+
           xhr.onload = function() {
             var data = parseJSONSafe(xhr.responseText);
             var ok = xhr.status >= 200 && xhr.status < 300;
             if (ok) {
-              setProgress(null, "Upload complete. Running pipeline...");
+              setProgress(null, "Generating content from extracted signals...");
               resolve({ status: xhr.status, data: data || {} });
               return;
             }
