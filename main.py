@@ -75,6 +75,7 @@ def format_srt_timestamp(seconds_float: float):
 
 
 def truncate_output(value: str, limit: int):
+    """Return a safe diagnostic string truncated to `limit` chars with marker."""
     text = str(value or "")
     if len(text) <= limit:
         return text
@@ -168,6 +169,7 @@ class FacelessVideoAssembler:
         self.ffmpeg = shutil.which("ffmpeg")
 
     def ffmpeg_diagnostics(self):
+        """Check ffmpeg presence/runtime and return lightweight diagnostics."""
         if not self.ffmpeg:
             return {
                 "available": False,
@@ -241,7 +243,7 @@ class FacelessVideoAssembler:
         if not ffmpeg_diag.get("available"):
             return {
                 "status": "unavailable",
-                "message": "ffmpeg is missing or not runnable in this environment. Ensure Railway installs ffmpeg (nixpacks or apt.txt).",
+                "message": "ffmpeg is missing or not runnable in this environment. Ensure deployment installs ffmpeg (nixpacks or apt.txt).",
                 "diagnostics": ffmpeg_diag
             }
 
