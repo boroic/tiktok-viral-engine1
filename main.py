@@ -18,6 +18,7 @@ from src.script_generator import ScriptGenerator
 from src.upload_handler import UploadHandler
 from src.influencer_finder import InfluencerFinder
 from src.api_client import APIManager
+from src.media_extractor import MediaExtractor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -203,6 +204,7 @@ class TikTokViralEngine:
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024
 engine = TikTokViralEngine()
+media_extractor = MediaExtractor()
 
 
 def resolve_upload_dir():
@@ -382,9 +384,9 @@ def run_pipeline_from_media():
         if not isinstance(target_audience, str):
             target_audience = "general"
 
-        media_grounding = {}
+        manual_overrides = {}
         for field in MEDIA_GROUNDING_FIELDS:
-            media_grounding[field] = request.form.get(field, "")
+            manual_overrides[field] = request.form.get(field, "")
 
         validation_errors = []
         normalized_uploads = []
@@ -441,7 +443,13 @@ def run_pipeline_from_media():
                         f"{filename}: file too large (max {format_bytes(MAX_MEDIA_FILE_BYTES)})"
                     ]
                 }), 400
-            results.append(
+            extracted_grounding = media_extractor.extract_media_signals(stored_path)
+            media_grounding = {}
+            for field in MEDIA_GROUNDING_FIELDS:
+                override = manual_overrides.get(field, "")
+                media_grounding[field] = override if override else extracted_grounding.get(field, "")
+
+            result = (
                 engine.run_from_media(
                     stored_path,
                     media_hash=media_hash,
@@ -450,6 +458,14 @@ def run_pipeline_from_media():
                     media_grounding=media_grounding
                 )
             )
+            result["media_extraction"] = {
+                "status": "success" if any(media_grounding.get(field, "") for field in MEDIA_GROUNDING_FIELDS) else "fallback",
+                "signals_detected": {
+                    field: bool(media_grounding.get(field, ""))
+                    for field in MEDIA_GROUNDING_FIELDS
+                }
+            }
+            results.append(result)
 
         if len(results) == 1:
             return jsonify(results[0]), 200
