@@ -59,6 +59,7 @@ MAX_ERROR_DETAILS_LENGTH = 500
 
 
 def env_flag_enabled(name: str):
+    """Return True only when env var is explicitly set to 'true' (case-insensitive)."""
     return str(os.environ.get(name, "")).strip().lower() == "true"
 
 
@@ -612,7 +613,7 @@ class TikTokViralEngine:
                 "status": "unavailable",
                 "provider": self.tts_provider.provider_name,
                 "error_type": "tts_disabled",
-                "message": "Voiceover disabled (no API credit). Generated silent video."
+                "message": "Voiceover disabled via DISABLE_TTS=true."
             }
         else:
             tts_result = self.tts_provider.synthesize(voiceover_script, normalized_voice, audio_path)
@@ -647,10 +648,16 @@ class TikTokViralEngine:
 
         guidance = None
         if tts_result.get("status") != "success":
-            if tts_result.get("error_type") in ("missing_api_key", "tts_disabled"):
+            if tts_result.get("error_type") == "missing_api_key":
                 guidance = (
                     "Voiceover is disabled due to missing API credit/key. "
                     "Set OPENAI_API_KEY and ensure TTS access to enable voice generation. "
+                    "Script, scene plan, caption, and hashtags were still generated."
+                )
+            elif tts_result.get("error_type") == "tts_disabled":
+                guidance = (
+                    "Voiceover was explicitly disabled by DISABLE_TTS=true. "
+                    "Set DISABLE_TTS=false to re-enable TTS. "
                     "Script, scene plan, caption, and hashtags were still generated."
                 )
             elif tts_result.get("error_type") == "rate_limited":
