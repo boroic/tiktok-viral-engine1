@@ -18,8 +18,8 @@
     .muted { color: #666; margin-bottom: 24px; font-size: 14px; }
 
     /* Input row */
-    .row { display: flex; gap: 8px; }
-    input[type="text"] {
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    input[type="text"], select {
       flex: 1;
       font-size: 16px;
       padding: 10px 14px;
@@ -28,7 +28,7 @@
       outline: none;
       background: #fff;
     }
-    input[type="text"]:focus { border-color: #555; }
+    input[type="text"]:focus, select:focus { border-color: #555; }
 
     /* Buttons */
     button {
@@ -53,6 +53,10 @@
     }
     button.secondary:hover:not(:disabled) { background: #f0f0f0; }
     button.copy-btn { min-width: 72px; }
+    button.primary {
+      background: #0b57d0;
+    }
+    button.primary:hover:not(:disabled) { background: #0842a1; }
 
     /* Loading spinner */
     #loadingBar {
@@ -245,16 +249,17 @@
       color: #333;
     }
 
-    /* Raw JSON collapsible */
-    #rawSection { margin-top: 20px; }
-    #rawSection summary {
+    /* Advanced collapsible */
+    #advancedSection { margin-top: 20px; }
+    #advancedSection summary {
       cursor: pointer;
       font-size: 14px;
       color: #555;
       padding: 8px 0;
       user-select: none;
     }
-    #rawSection summary:hover { color: #111; }
+    #advancedSection summary:hover { color: #111; }
+    .advanced-actions { margin: 8px 0 10px; }
     pre.raw-json {
       background: #111;
       color: #0f0;
@@ -276,11 +281,22 @@
       transition: opacity 0.3s;
     }
     .copy-feedback.show { opacity: 1; }
+
+    @media (max-width: 640px) {
+      body {
+        margin: 20px auto;
+        padding: 0 12px;
+      }
+      .row { flex-direction: column; }
+      .row input[type="text"], .row select, .row button { width: 100%; }
+      .results-header { align-items: flex-start; }
+      .analytics-grid { grid-template-columns: 1fr 1fr; }
+    }
   </style>
 </head>
 <body>
   <h1>🚀 TikTok Viral Engine</h1>
-  <p class="muted">Enter a topic or upload media and run the content pipeline.</p>
+  <p class="muted">Generate a ready-to-post caption in one click.</p>
 
   <div class="row">
     <input id="topic" type="text" placeholder="e.g. fitness motivation" />
@@ -292,6 +308,10 @@
     </select>
     <input id="targetAudience" type="text" placeholder="Target audience (e.g. busy parents)" />
     <button id="runBtn" onclick="runPipeline()">▶ Run</button>
+  </div>
+  <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+    <button id="generateCopyBtn" class="primary" onclick="generateAndCopyCaption()">✨ Generate + Copy Caption</button>
+    <button id="regenerateBtn" class="secondary" onclick="regenerate()">↻ Regenerate</button>
   </div>
   <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
     <input id="mediaInput" type="file" accept="image/*,video/*" multiple />
@@ -325,7 +345,18 @@
   <div id="results">
     <div class="results-header">
       <span class="topic-label" id="topicLabel"></span>
-      <button class="secondary" id="downloadBtn" onclick="downloadJSON()">⬇ Download JSON</button>
+    </div>
+
+    <!-- Ready-to-post caption card -->
+    <div class="card" id="cardReadyCaption">
+      <div class="card-header">
+        <div class="card-title">✅ Ready-to-Post Caption</div>
+        <div style="display:flex;align-items:center;">
+          <span class="copy-feedback" id="copyFeedbackReadyCaption">Copied!</span>
+          <button class="secondary copy-btn" onclick="copySection('readyCaption', 'copyFeedbackReadyCaption')">Copy</button>
+        </div>
+      </div>
+      <div class="card-body" id="readyCaptionBody"></div>
     </div>
 
     <!-- Script card -->
@@ -380,9 +411,12 @@
       <div class="influencer-list" id="influencersBody"></div>
     </div>
 
-    <!-- Raw JSON collapsible -->
-    <details id="rawSection">
-      <summary>🔍 Raw JSON (debug)</summary>
+    <!-- Advanced collapsible -->
+    <details id="advancedSection">
+      <summary>⚙️ Advanced</summary>
+      <div class="advanced-actions">
+        <button class="secondary" id="downloadBtn" onclick="downloadJSON()">⬇ Download JSON</button>
+      </div>
       <pre class="raw-json" id="rawJson"></pre>
     </details>
   </div>
@@ -396,6 +430,9 @@
     var MAX_RETRIES = 2;
     var RETRY_DELAY_BASE_MS = 500;
     var RETRYABLE_STATUS = { 408: true, 429: true, 500: true, 502: true, 503: true, 504: true };
+    var DEFAULT_TOPIC = "viral_trends";
+    var DEFAULT_TARGET_AUDIENCE = "general";
+    var _lastRunMode = "topic";
 
     function formatBytes(numBytes) {
       var units = ["B", "KB", "MB", "GB"];
@@ -436,6 +473,8 @@
       }
       document.getElementById("runBtn").disabled = on;
       document.getElementById("runMediaBtn").disabled = on;
+      document.getElementById("generateCopyBtn").disabled = on;
+      document.getElementById("regenerateBtn").disabled = on;
     }
 
     function showError(msg, errors) {
@@ -469,6 +508,10 @@
       _lastData = data;
 
       document.getElementById("topicLabel").textContent = "Topic: " + (data.topic || "");
+
+      var scriptParts = getScriptParts(data.script);
+      var readyCaption = buildReadyCaption(scriptParts, data.hashtags);
+      document.getElementById("readyCaptionBody").textContent = readyCaption || "(no caption returned)";
 
       // Script
       var script = data.script;
@@ -587,6 +630,8 @@
         text = (typeof _lastData.script === "string")
           ? _lastData.script
           : JSON.stringify(_lastData.script, null, 2);
+      } else if (section === "readyCaption") {
+        text = buildReadyCaption(getScriptParts(_lastData.script), _lastData.hashtags);
       } else if (section === "hashtags") {
         var tags = _lastData.hashtags;
         text = Array.isArray(tags) ? tags.join(" ") : String(tags || "");
@@ -604,6 +649,58 @@
       } else {
         fallbackCopy(text, feedbackEl);
       }
+    }
+
+    function getScriptParts(script) {
+      var hook = "";
+      var body = "";
+      var cta = "";
+      if (script && typeof script === "object" && !Array.isArray(script)) {
+        hook = String(script.hook || "").trim();
+        if (Array.isArray(script.body)) {
+          body = script.body.map(function(line) { return String(line || "").trim(); }).filter(Boolean).join("\n");
+        } else {
+          body = String(script.body || "").trim();
+        }
+        cta = String(script.cta || "").trim();
+      } else if (typeof script === "string") {
+        body = script.trim();
+      }
+      return { hook: hook, body: body, cta: cta };
+    }
+
+    function normalizeHashtag(tag) {
+      var t = String(tag || "").trim();
+      if (!t) return "";
+      var withoutHashes = t.replace(/^#+/, "");
+      var content = withoutHashes.replace(/\s+/g, "").trim();
+      if (!content) return "";
+      return "#" + content;
+    }
+
+    function getHashtagText(hashtags) {
+      if (Array.isArray(hashtags)) {
+        return hashtags.map(normalizeHashtag).filter(Boolean).join(" ");
+      }
+      if (typeof hashtags === "string") {
+        return hashtags.trim();
+      }
+      return "";
+    }
+
+    function buildReadyCaption(scriptParts, hashtags) {
+      var lines = [];
+      if (scriptParts.hook) lines.push(scriptParts.hook);
+      if (scriptParts.body) lines.push(scriptParts.body);
+      if (scriptParts.cta) lines.push(scriptParts.cta);
+      var tags = getHashtagText(hashtags);
+      if (tags) lines.push(tags);
+      return lines.join("\n\n").trim();
+    }
+
+    function hasMediaFiles() {
+      var mediaInput = document.getElementById("mediaInput");
+      return !!(mediaInput && mediaInput.files && mediaInput.files.length > 0);
     }
 
     function fallbackCopy(text, feedbackEl) {
@@ -794,10 +891,13 @@
       }, 100);
     }
 
-    async function runPipeline() {
-      var topic = document.getElementById("topic").value.trim() || "viral_trends";
+    async function runPipeline(options) {
+      options = options || {};
+      var topic = document.getElementById("topic").value.trim() || DEFAULT_TOPIC;
       var tone = document.getElementById("tone").value || "balanced";
-      var targetAudience = document.getElementById("targetAudience").value.trim() || "general";
+      var targetAudience = document.getElementById("targetAudience").value.trim() || DEFAULT_TARGET_AUDIENCE;
+      var ok = false;
+      _lastRunMode = "topic";
       _lastMediaResults = null;
       hideError();
       document.getElementById("results").className = "";
@@ -821,22 +921,29 @@
           showError("Error " + res.status + ": " + msg, data && data.errors);
         } else {
           renderResults(data);
+          if (options.copyAfterGenerate) {
+            copySection("readyCaption", "copyFeedbackReadyCaption");
+          }
+          ok = true;
         }
       } catch (e) {
         showError("Network error: " + e.message);
       } finally {
         setLoading(false, "");
       }
+      return ok;
     }
 
-    async function runFromMedia() {
+    async function runFromMedia(options) {
+      options = options || {};
       const mediaInput = document.getElementById("mediaInput");
       const files = Array.prototype.slice.call(mediaInput.files || []);
       var tone = document.getElementById("tone").value || "balanced";
-      var targetAudience = document.getElementById("targetAudience").value.trim() || "general";
+      var targetAudience = document.getElementById("targetAudience").value.trim() || DEFAULT_TARGET_AUDIENCE;
       var ocrText = document.getElementById("ocrText").value.trim();
       var transcriptText = document.getElementById("transcriptText").value.trim();
       var keyframeSummary = document.getElementById("keyframeSummary").value.trim();
+      var ok = false;
       _lastMediaResults = null;
       hideError();
       document.getElementById("results").className = "";
@@ -844,9 +951,10 @@
       var clientErrors = getMediaValidationErrors(files);
       if (clientErrors.length > 0) {
         showError("Please fix the media selection issues:", clientErrors);
-        return;
+        return false;
       }
 
+      _lastRunMode = "media";
       setLoading(true, "media upload", 0, "Preparing upload...");
 
       try {
@@ -882,11 +990,35 @@
             document.getElementById("topicLabel").textContent =
               "Media: " + primary.media_context.filename + " · Topic: " + (primary.topic || "");
           }
+          if (options.copyAfterGenerate) {
+            copySection("readyCaption", "copyFeedbackReadyCaption");
+          }
+          ok = true;
         }
       } catch (e) {
         showError("Network error: " + e.message);
       } finally {
         setLoading(false, "");
+      }
+      return ok;
+    }
+
+    async function generateAndCopyCaption() {
+      var hasMedia = hasMediaFiles();
+      var succeeded = false;
+      if (hasMedia) {
+        succeeded = await runFromMedia({ copyAfterGenerate: true });
+      } else {
+        succeeded = await runPipeline({ copyAfterGenerate: true });
+      }
+      if (!succeeded) return;
+    }
+
+    async function regenerate() {
+      if (_lastRunMode === "media") {
+        await runFromMedia();
+      } else {
+        await runPipeline();
       }
     }
 
