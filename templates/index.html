@@ -248,6 +248,37 @@
       font-size: 14px;
       color: #333;
     }
+    .mode-toggle {
+      display: inline-flex;
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 999px;
+      padding: 4px;
+      gap: 4px;
+    }
+    .mode-toggle button {
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-size: 13px;
+      background: transparent;
+      color: #333;
+      border: none;
+    }
+    .mode-toggle button.active {
+      background: #111;
+      color: #fff;
+    }
+    .scene-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .scene-item {
+      background: #f8f8fc;
+      border: 1px solid #e8e8f0;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
 
     /* Advanced collapsible */
     #advancedSection { margin-top: 20px; }
@@ -297,6 +328,12 @@
 <body>
   <h1>🚀 TikTok Viral Engine</h1>
   <p class="muted">Generate a ready-to-post caption in one click.</p>
+  <div style="margin-bottom:12px;">
+    <div class="mode-toggle" role="group" aria-label="Content mode">
+      <button id="modeCaptionOnlyBtn" class="active" aria-pressed="true" onclick="setContentMode('caption_only')">Caption Only</button>
+      <button id="modeFullPackBtn" aria-pressed="false" onclick="setContentMode('full_content_pack')">Full Content Pack</button>
+    </div>
+  </div>
 
   <div class="row">
     <input id="topic" type="text" placeholder="e.g. fitness motivation" />
@@ -310,7 +347,10 @@
     <button id="runBtn" onclick="runPipeline()">▶ Run</button>
   </div>
   <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-    <button id="generateCopyBtn" class="primary" onclick="generateAndCopyCaption()">✨ Generate + Copy Caption</button>
+    <button id="generateCopyBtn" class="primary" onclick="generateAndCopyCaption()">✨ Generate + Copy Caption (Caption Only)</button>
+    <button id="generateFullPackBtn" class="primary" onclick="generateFullPack()">📦 Generate Full Pack</button>
+    <button id="copyAllBtn" class="secondary" onclick="copyAllContent()">📋 Copy All</button>
+    <span class="copy-feedback" id="copyFeedbackAll">Copied!</span>
     <button id="regenerateBtn" class="secondary" onclick="regenerate()">↻ Regenerate</button>
   </div>
   <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -395,6 +435,14 @@
       <div class="captions-list" id="captionsBody"></div>
     </div>
 
+    <!-- Full content pack card -->
+    <div class="card" id="cardFullPack" style="display:none;">
+      <div class="card-header">
+        <div class="card-title">📦 Full Content Pack</div>
+      </div>
+      <div class="card-body" id="fullPackBody"></div>
+    </div>
+
     <!-- Predicted analytics card -->
     <div class="card" id="cardAnalytics">
       <div class="card-header">
@@ -416,6 +464,7 @@
       <summary>⚙️ Advanced</summary>
       <div class="advanced-actions">
         <button class="secondary" id="downloadBtn" onclick="downloadJSON()">⬇ Download JSON</button>
+        <button class="secondary" id="downloadTxtBtn" onclick="downloadTxt()">⬇ Export .txt</button>
       </div>
       <pre class="raw-json" id="rawJson"></pre>
     </details>
@@ -433,6 +482,16 @@
     var DEFAULT_TOPIC = "viral_trends";
     var DEFAULT_TARGET_AUDIENCE = "general";
     var _lastRunMode = "topic";
+    var _contentMode = "caption_only";
+
+    function setContentMode(mode) {
+      _contentMode = (mode === "full_content_pack") ? "full_content_pack" : "caption_only";
+      document.getElementById("modeCaptionOnlyBtn").className = (_contentMode === "caption_only") ? "active" : "";
+      document.getElementById("modeFullPackBtn").className = (_contentMode === "full_content_pack") ? "active" : "";
+      document.getElementById("modeCaptionOnlyBtn").setAttribute("aria-pressed", _contentMode === "caption_only" ? "true" : "false");
+      document.getElementById("modeFullPackBtn").setAttribute("aria-pressed", _contentMode === "full_content_pack" ? "true" : "false");
+      document.getElementById("cardFullPack").style.display = (_contentMode === "full_content_pack") ? "" : "none";
+    }
 
     function formatBytes(numBytes) {
       var units = ["B", "KB", "MB", "GB"];
@@ -474,6 +533,8 @@
       document.getElementById("runBtn").disabled = on;
       document.getElementById("runMediaBtn").disabled = on;
       document.getElementById("generateCopyBtn").disabled = on;
+      document.getElementById("generateFullPackBtn").disabled = on;
+      document.getElementById("copyAllBtn").disabled = on;
       document.getElementById("regenerateBtn").disabled = on;
     }
 
@@ -611,8 +672,65 @@
 
       // Raw JSON
       document.getElementById("rawJson").textContent = JSON.stringify(data, null, 2);
+      renderFullContentPack(data);
 
       document.getElementById("results").className = "visible";
+    }
+
+    function ensureArray(value) {
+      if (Array.isArray(value)) return value;
+      if (value === null || value === undefined) return [];
+      return [value];
+    }
+
+    function renderFullContentPack(data) {
+      var card = document.getElementById("cardFullPack");
+      var body = document.getElementById("fullPackBody");
+      var pack = (data && data.full_content_pack && typeof data.full_content_pack === "object")
+        ? data.full_content_pack
+        : null;
+      if (!pack) {
+        card.style.display = (_contentMode === "full_content_pack") ? "" : "none";
+        body.textContent = (_contentMode === "full_content_pack") ? "(no full content pack returned)" : "";
+        return;
+      }
+      card.style.display = "";
+      var html = "";
+      html += "<strong>Video Concept:</strong> " + escHtml(String(pack.video_concept || "")) + "<br/><br/>";
+      html += "<strong>Hook Options:</strong><br/>";
+      ensureArray(pack.hook_options).slice(0, 3).forEach(function(hook, idx) {
+        html += (idx + 1) + ". " + escHtml(String(hook || "")) + "<br/>";
+      });
+      html += "<br/><strong>Shot List:</strong><div class=\"scene-list\">";
+      ensureArray(pack.shot_list).forEach(function(scene) {
+        if (scene && typeof scene === "object") {
+          html += "<div class=\"scene-item\"><strong>Scene " + escHtml(String(scene.scene || "")) + "</strong> (" + escHtml(String(scene.duration_seconds || "")) + ")<br/>" +
+            escHtml(String(scene.shot || "")) + "<br/><em>" + escHtml(String(scene.purpose || "")) + "</em></div>";
+        } else {
+          html += "<div class=\"scene-item\">" + escHtml(String(scene || "")) + "</div>";
+        }
+      });
+      html += "</div><br/><strong>On-Screen Text:</strong><div class=\"scene-list\">";
+      ensureArray(pack.on_screen_text).forEach(function(item) {
+        if (item && typeof item === "object") {
+          html += "<div class=\"scene-item\"><strong>Scene " + escHtml(String(item.scene || "")) + ":</strong> " + escHtml(String(item.text || "")) + "</div>";
+        } else {
+          html += "<div class=\"scene-item\">" + escHtml(String(item || "")) + "</div>";
+        }
+      });
+      html += "</div><br/><strong>Voiceover Script:</strong><br/>" + escHtml(String(pack.voiceover_script || "")) + "<br/><br/>";
+      html += "<strong>Editing Notes:</strong><br/>";
+      ensureArray(pack.editing_notes).forEach(function(note, idx) {
+        html += (idx + 1) + ". " + escHtml(String(note || "")) + "<br/>";
+      });
+      html += "<br/><strong>Caption Final:</strong><br/>" + escHtml(String(pack.caption_final || "")) + "<br/><br/>";
+      html += "<strong>Hashtags:</strong> " + escHtml(ensureArray(pack.hashtags).join(" ")) + "<br/><br/>";
+      html += "<strong>Thumbnail Text:</strong> " + escHtml(String(pack.thumbnail_text || "")) + "<br/><br/>";
+      html += "<strong>CTA Variants:</strong><br/>";
+      ensureArray(pack.cta_variants).slice(0, 3).forEach(function(cta, idx) {
+        html += (idx + 1) + ". " + escHtml(String(cta || "")) + "<br/>";
+      });
+      body.innerHTML = html;
     }
 
     function escHtml(str) {
@@ -638,6 +756,8 @@
       } else if (section === "captions") {
         var caps = _lastData.captions;
         text = Array.isArray(caps) ? caps.join("\n\n") : String(caps || "");
+      } else if (section === "all") {
+        text = buildAllTextPayload();
       }
       var feedbackEl = document.getElementById(feedbackId);
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -696,6 +816,74 @@
       var tags = getHashtagText(hashtags);
       if (tags) lines.push(tags);
       return lines.join("\n\n").trim();
+    }
+
+    function buildAllTextPayload() {
+      if (!_lastData) return "";
+      var lines = [];
+      lines.push("Topic: " + String(_lastData.topic || ""));
+      lines.push("");
+      lines.push("Ready-to-Post Caption:");
+      lines.push(buildReadyCaption(getScriptParts(_lastData.script), _lastData.hashtags) || "");
+      lines.push("");
+      var pack = (_lastData.full_content_pack && typeof _lastData.full_content_pack === "object")
+        ? _lastData.full_content_pack
+        : null;
+      if (pack) {
+        lines.push("Full Content Pack");
+        lines.push("Video Concept: " + String(pack.video_concept || ""));
+        lines.push("");
+        lines.push("Hook Options:");
+        ensureArray(pack.hook_options).slice(0, 3).forEach(function(item, idx) {
+          lines.push((idx + 1) + ". " + String(item || ""));
+        });
+        lines.push("");
+        lines.push("Shot List:");
+        ensureArray(pack.shot_list).forEach(function(scene) {
+          if (scene && typeof scene === "object") {
+            lines.push(
+              "- Scene " + String(scene.scene || "") +
+              " (" + String(scene.duration_seconds || "") + "): " +
+              String(scene.shot || "") +
+              (scene.purpose ? " | " + String(scene.purpose) : "")
+            );
+          } else {
+            lines.push("- " + String(scene || ""));
+          }
+        });
+        lines.push("");
+        lines.push("On-Screen Text:");
+        ensureArray(pack.on_screen_text).forEach(function(item) {
+          if (item && typeof item === "object") {
+            lines.push("- Scene " + String(item.scene || "") + ": " + String(item.text || ""));
+          } else {
+            lines.push("- " + String(item || ""));
+          }
+        });
+        lines.push("");
+        lines.push("Voiceover Script:");
+        lines.push(String(pack.voiceover_script || ""));
+        lines.push("");
+        lines.push("Editing Notes:");
+        ensureArray(pack.editing_notes).forEach(function(note, idx) {
+          lines.push((idx + 1) + ". " + String(note || ""));
+        });
+        lines.push("");
+        lines.push("Caption Final:");
+        lines.push(String(pack.caption_final || ""));
+        lines.push("");
+        lines.push("Hashtags:");
+        lines.push(ensureArray(pack.hashtags).join(" "));
+        lines.push("");
+        lines.push("Thumbnail Text:");
+        lines.push(String(pack.thumbnail_text || ""));
+        lines.push("");
+        lines.push("CTA Variants:");
+        ensureArray(pack.cta_variants).slice(0, 3).forEach(function(cta, idx) {
+          lines.push((idx + 1) + ". " + String(cta || ""));
+        });
+      }
+      return lines.join("\n");
     }
 
     function hasMediaFiles() {
@@ -891,6 +1079,28 @@
       }, 100);
     }
 
+    function downloadTxt() {
+      if (!_lastData && !_lastMediaResults) return;
+      var text = buildAllTextPayload();
+      var blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      var topic = (_lastData && _lastData.topic) ? _lastData.topic : "result";
+      a.download = "tiktok-pipeline-" + topic.replace(/[^a-zA-Z0-9_-]/g, "_") + ".txt";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function() {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
+    }
+
+    function copyAllContent() {
+      if (!_lastData) return;
+      copySection("all", "copyFeedbackAll");
+    }
+
     async function runPipeline(options) {
       options = options || {};
       var topic = document.getElementById("topic").value.trim() || DEFAULT_TOPIC;
@@ -910,7 +1120,8 @@
           body: JSON.stringify({
             topic: topic,
             tone: tone,
-            target_audience: targetAudience
+            target_audience: targetAudience,
+            content_mode: _contentMode
           })
         }, "pipeline run");
         var res = response.res;
@@ -961,6 +1172,7 @@
         const form = new FormData();
         form.append("tone", tone);
         form.append("target_audience", targetAudience);
+        form.append("content_mode", _contentMode);
         if (ocrText) form.append("ocr_text", ocrText);
         if (transcriptText) form.append("transcript_text", transcriptText);
         if (keyframeSummary) form.append("keyframe_summary", keyframeSummary);
@@ -1004,6 +1216,7 @@
     }
 
     async function generateAndCopyCaption() {
+      setContentMode("caption_only");
       var hasMedia = hasMediaFiles();
       var succeeded = false;
       if (hasMedia) {
@@ -1012,6 +1225,16 @@
         succeeded = await runPipeline({ copyAfterGenerate: true });
       }
       if (!succeeded) return;
+    }
+
+    async function generateFullPack() {
+      setContentMode("full_content_pack");
+      var hasMedia = hasMediaFiles();
+      if (hasMedia) {
+        await runFromMedia();
+      } else {
+        await runPipeline();
+      }
     }
 
     async function regenerate() {
