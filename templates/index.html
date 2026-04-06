@@ -279,6 +279,18 @@
       border-radius: 8px;
       padding: 10px 12px;
     }
+    .auto-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .auto-meta {
+      font-size: 13px;
+      color: #555;
+      margin-top: 6px;
+      white-space: pre-wrap;
+    }
 
     /* Advanced collapsible */
     #advancedSection { margin-top: 20px; }
@@ -352,6 +364,33 @@
     <button id="copyAllBtn" class="secondary" onclick="copyAllContent()">📋 Copy All</button>
     <span class="copy-feedback" id="copyFeedbackAll">Copied!</span>
     <button id="regenerateBtn" class="secondary" onclick="regenerate()">↻ Regenerate</button>
+  </div>
+  <div class="card" style="margin-top:12px;">
+    <div class="card-header">
+      <div class="card-title">🎬 Auto Create Video (Faceless MVP)</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button id="autoCreateVideoBtn" class="primary" onclick="runAutoCreateVideo()">Auto Create Video</button>
+        <button id="downloadMp4Btn" class="secondary" onclick="downloadMp4()" disabled>Download MP4</button>
+        <button id="copyCaptionBtn" class="secondary" onclick="copyAutoCaption()">Copy Caption</button>
+      </div>
+    </div>
+    <div class="auto-grid">
+      <select id="autoDuration">
+        <option value="30">Duration: 30s</option>
+        <option value="45" selected>Duration: 45s</option>
+        <option value="60">Duration: 60s</option>
+      </select>
+      <select id="autoVoicePreset">
+        <option value="male">Voice: Male</option>
+        <option value="female" selected>Voice: Female</option>
+      </select>
+      <select id="autoStylePreset">
+        <option value="educational" selected>Style: Educational</option>
+        <option value="storytelling">Style: Storytelling</option>
+        <option value="checklist">Style: Checklist</option>
+      </select>
+    </div>
+    <div class="auto-meta" id="autoGuidanceText"></div>
   </div>
   <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
     <input id="mediaInput" type="file" accept="image/*,video/*" multiple />
@@ -443,6 +482,14 @@
       <div class="card-body" id="fullPackBody"></div>
     </div>
 
+    <!-- Auto video card -->
+    <div class="card" id="cardAutoVideo" style="display:none;">
+      <div class="card-header">
+        <div class="card-title">🎞️ Auto-Created Video</div>
+      </div>
+      <div class="card-body" id="autoVideoBody"></div>
+    </div>
+
     <!-- Predicted analytics card -->
     <div class="card" id="cardAnalytics">
       <div class="card-header">
@@ -483,6 +530,7 @@
     var DEFAULT_TARGET_AUDIENCE = "general";
     var _lastRunMode = "topic";
     var _contentMode = "caption_only";
+    var _lastAutoVideo = null;
 
     function setContentMode(mode) {
       _contentMode = (mode === "full_content_pack") ? "full_content_pack" : "caption_only";
@@ -536,6 +584,7 @@
       document.getElementById("generateFullPackBtn").disabled = on;
       document.getElementById("copyAllBtn").disabled = on;
       document.getElementById("regenerateBtn").disabled = on;
+      document.getElementById("autoCreateVideoBtn").disabled = on;
     }
 
     function showError(msg, errors) {
@@ -673,8 +722,43 @@
       // Raw JSON
       document.getElementById("rawJson").textContent = JSON.stringify(data, null, 2);
       renderFullContentPack(data);
+      renderAutoVideo(data);
 
       document.getElementById("results").className = "visible";
+    }
+
+    function renderAutoVideo(data) {
+      var card = document.getElementById("cardAutoVideo");
+      var body = document.getElementById("autoVideoBody");
+      var guide = document.getElementById("autoGuidanceText");
+      var downloadBtn = document.getElementById("downloadMp4Btn");
+      if (!data || data.mode !== "auto_create_video") {
+        card.style.display = "none";
+        body.textContent = "";
+        guide.textContent = "";
+        downloadBtn.disabled = true;
+        _lastAutoVideo = null;
+        return;
+      }
+      _lastAutoVideo = data;
+      card.style.display = "";
+      var sceneHtml = "";
+      var scenes = Array.isArray(data.scene_plan) ? data.scene_plan : [];
+      scenes.forEach(function(scene) {
+        sceneHtml += "<div class=\"scene-item\"><strong>Scene " + escHtml(String(scene.scene || "")) +
+          " (" + escHtml(String(scene.start_second || 0)) + "s-" + escHtml(String(scene.end_second || 0)) + "s)</strong><br/>" +
+          escHtml(String(scene.visual_template || "")) + "<br/>" +
+          "<em>" + escHtml(String(scene.on_screen_text || "")) + "</em></div>";
+      });
+      var hashtagsText = getHashtagText(data.hashtags);
+      body.innerHTML =
+        "<strong>Video status:</strong> " + escHtml(String((data.video && data.video.status) || "unknown")) + "<br/>" +
+        "<strong>Message:</strong> " + escHtml(String((data.video && data.video.message) || "")) + "<br/><br/>" +
+        "<strong>Caption Final:</strong><br/>" + escHtml(String(data.caption_final || "")) + "<br/><br/>" +
+        "<strong>Hashtags:</strong><br/>" + escHtml(String(hashtagsText || "")) + "<br/><br/>" +
+        "<strong>Scene Plan:</strong><div class=\"scene-list\">" + sceneHtml + "</div>";
+      guide.textContent = data.guidance ? String(data.guidance) : "";
+      downloadBtn.disabled = !((data.video && data.video.download_url) || "");
     }
 
     function ensureArray(value) {
@@ -1101,6 +1185,23 @@
       copySection("all", "copyFeedbackAll");
     }
 
+    function copyAutoCaption() {
+      if (_lastAutoVideo && _lastAutoVideo.caption_final) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(String(_lastAutoVideo.caption_final));
+        } else {
+          fallbackCopy(String(_lastAutoVideo.caption_final), document.getElementById("copyFeedbackAll"));
+        }
+        return;
+      }
+      copySection("readyCaption", "copyFeedbackReadyCaption");
+    }
+
+    function downloadMp4() {
+      if (!_lastAutoVideo || !_lastAutoVideo.video || !_lastAutoVideo.video.download_url) return;
+      window.location.href = _lastAutoVideo.video.download_url;
+    }
+
     async function runPipeline(options) {
       options = options || {};
       var topic = document.getElementById("topic").value.trim() || DEFAULT_TOPIC;
@@ -1237,9 +1338,53 @@
       }
     }
 
+    async function runAutoCreateVideo() {
+      var topic = document.getElementById("topic").value.trim() || DEFAULT_TOPIC;
+      var tone = document.getElementById("tone").value || "balanced";
+      var targetAudience = document.getElementById("targetAudience").value.trim() || DEFAULT_TARGET_AUDIENCE;
+      var duration = Number(document.getElementById("autoDuration").value || "45");
+      var voicePreset = document.getElementById("autoVoicePreset").value || "female";
+      var stylePreset = document.getElementById("autoStylePreset").value || "educational";
+      _lastRunMode = "auto_video";
+      _lastMediaResults = null;
+      hideError();
+      document.getElementById("results").className = "";
+      setLoading(true, topic, null, "Generating script, scene plan, voiceover, and video...");
+      try {
+        var response = await fetchJsonWithRetry("/auto-create-video", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topic: topic,
+            tone: tone,
+            target_audience: targetAudience,
+            duration: duration,
+            voice_preset: voicePreset,
+            style_preset: stylePreset
+          })
+        }, "auto create video");
+        var res = response.res;
+        var data = response.data;
+        if (!res.ok) {
+          var msg = (data && data.message) ? data.message : JSON.stringify(data, null, 2);
+          showError("Error " + res.status + ": " + msg, data && data.errors);
+          return false;
+        }
+        renderResults(data || {});
+        return true;
+      } catch (e) {
+        showError("Network error: " + e.message);
+        return false;
+      } finally {
+        setLoading(false, "");
+      }
+    }
+
     async function regenerate() {
       if (_lastRunMode === "media") {
         await runFromMedia();
+      } else if (_lastRunMode === "auto_video") {
+        await runAutoCreateVideo();
       } else {
         await runPipeline();
       }
