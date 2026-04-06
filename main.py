@@ -53,8 +53,8 @@ SUPPORTED_VOICE_PRESETS = {"male", "female"}
 SUPPORTED_STYLE_PRESETS = {"educational", "storytelling", "checklist"}
 MAX_VOICEOVER_CHARS = 3000
 MAX_ARTIFACTS = int(os.environ.get("MAX_GENERATED_ARTIFACTS", "200"))
-MAX_TTS_ERROR_DETAILS_LENGTH = 400
-MAX_DIAGNOSTIC_OUTPUT_LENGTH = 300
+MAX_TTS_DETAILS_LENGTH = 400
+MAX_DIAGNOSTIC_DETAILS_LENGTH = 300
 MAX_ERROR_DETAILS_LENGTH = 500
 
 
@@ -75,7 +75,7 @@ def format_srt_timestamp(seconds_float: float):
 
 
 def truncate_output(value: str, limit: int):
-    """Return a safe diagnostic string truncated to `limit` chars with marker."""
+    """Safely stringify any value (including None) and truncate diagnostic text."""
     text = str(value or "")
     if len(text) <= limit:
         return text
@@ -153,7 +153,7 @@ class OpenAITTSProvider(BaseTTSProvider):
                 "error_type": error_type,
                 "message": message,
                 "http_status": exc.code,
-                "details": body[:MAX_TTS_ERROR_DETAILS_LENGTH]
+                "details": body[:MAX_TTS_DETAILS_LENGTH]
             }
         except Exception as exc:
             return {
@@ -189,9 +189,11 @@ class FacelessVideoAssembler:
                     "available": False,
                     "path": self.ffmpeg,
                     "message": "ffmpeg binary found but not runnable.",
-                    "details": truncate_output((proc.stderr or proc.stdout or ""), MAX_DIAGNOSTIC_OUTPUT_LENGTH)
+                    "details": truncate_output((proc.stderr or proc.stdout or ""), MAX_DIAGNOSTIC_DETAILS_LENGTH)
                 }
-            first_line = ((proc.stdout or "").strip().splitlines() or [""])[0]
+            stdout_text = (proc.stdout or "").strip()
+            lines = stdout_text.splitlines() or [""]
+            first_line = lines[0]
             return {
                 "available": True,
                 "path": self.ffmpeg,
@@ -243,7 +245,7 @@ class FacelessVideoAssembler:
         if not ffmpeg_diag.get("available"):
             return {
                 "status": "unavailable",
-                "message": "ffmpeg is missing or not runnable in this environment. Ensure deployment installs ffmpeg (nixpacks or apt.txt).",
+                "message": "ffmpeg is missing or not runnable in this environment. Ensure deployment installs ffmpeg.",
                 "diagnostics": ffmpeg_diag
             }
 
