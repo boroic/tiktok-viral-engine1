@@ -746,7 +746,18 @@
       var sceneHtml = "";
       var scenes = Array.isArray(data.scene_plan) ? data.scene_plan : [];
       scenes.forEach(function(scene) {
-        sceneHtml += `<div class="scene-item"><strong>Scene ${escHtml(String(scene.scene || ""))} (${escHtml(String(scene.start_second || 0))}s-${escHtml(String(scene.end_second || 0))}s)</strong><br/>${escHtml(String(scene.visual_template || ""))}<br/><em>${escHtml(String(scene.on_screen_text || ""))}</em></div>`;
+        var sceneNumber = escHtml(String(scene.scene || ""));
+        var startSec = escHtml(String(scene.start_second || 0));
+        var endSec = escHtml(String(scene.end_second || 0));
+        var visualText = escHtml(String(scene.visual_template || ""));
+        var onScreenText = escHtml(String(scene.on_screen_text || ""));
+        sceneHtml += `
+          <div class="scene-item">
+            <strong>Scene ${sceneNumber} (${startSec}s-${endSec}s)</strong><br/>
+            ${visualText}<br/>
+            <em>${onScreenText}</em>
+          </div>
+        `;
       });
       var hashtagsText = getHashtagText(data.hashtags);
       body.innerHTML =

@@ -466,7 +466,7 @@ class TikTokViralEngine:
                     except Exception:
                         pass
 
-    def _get_artifact_path(self, artifact_id: str):
+    def get_artifact_path(self, artifact_id: str):
         with self.artifact_lock:
             path_str = self.generated_artifacts.get(artifact_id)
             if not path_str:
@@ -554,9 +554,13 @@ class TikTokViralEngine:
             mp4_url = ""
             video_status = "not_generated"
             missing = []
+            video_message_text = video_result.get("message", "Video assembly unavailable")
+            if video_message_text:
+                missing.append(video_message_text)
             if tts_result.get("status") != "success":
-                missing.append(tts_result.get("message", "TTS unavailable"))
-            missing.append(video_result.get("message", "Video assembly unavailable"))
+                tts_message = tts_result.get("message", "TTS unavailable")
+                if tts_message:
+                    missing.append(tts_message)
             video_message = " ".join([str(part) for part in missing if part]).strip()
 
         guidance = None
@@ -856,7 +860,7 @@ def download_artifact(artifact_id):
     safe_id = str(artifact_id or "").strip().lower()
     if not re.fullmatch(r"[a-f0-9]{32}", safe_id):
         return jsonify({"status": "error", "message": "invalid artifact id"}), 400
-    path = engine._get_artifact_path(safe_id)
+    path = engine.get_artifact_path(safe_id)
     if path is None:
         return jsonify({"status": "error", "message": "artifact not found"}), 404
     return send_file(
