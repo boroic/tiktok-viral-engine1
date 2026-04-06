@@ -1,6 +1,7 @@
 {
-  "name": "tiktok-viral-engine",
-  "runtime": "python",
-  "buildCommand": "pip install -r requirements.txt",
-  "startCommand": "python main.py --mock-upload --topic viral_trends"
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile"
+  }
 }
