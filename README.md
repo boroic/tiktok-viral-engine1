@@ -129,21 +129,21 @@ The web UI now includes a dedicated **Auto Create Video (Faceless MVP)** card wi
 
 Existing caption generation and media-based flows remain intact and backward compatible.
 
-## 🚂 Railway Deployment Notes (ffmpeg + Auto Create Video)
+## 🚂 Railway Deployment Notes (Dockerfile + ffmpeg)
 
-- The repo keeps `nixpacks.toml` with `ffmpeg` and also includes root `apt.txt` with `ffmpeg` as a safe fallback when builder behavior ignores nixpacks.
-- This is intentionally minimal and reversible for production reliability.
+- Railway is configured to build from the root `Dockerfile` (`railway.json` uses `builder: DOCKERFILE`).
+- The Docker image installs `ffmpeg` with `apt-get` on `python:3.11-slim` so MP4 export is available in production.
+- Startup logs include an `ffmpeg startup check` line with path and version when available.
 
 ### Verify on Railway (manual)
 
-1. Deploy latest `main` and open Railway build logs.
-2. Confirm ffmpeg installation appears from either nixpacks (`nixPkgs = ["ffmpeg"]`) or apt package installation (`apt.txt`).
-3. Optionally set `DISABLE_TTS=true` to force no-voice mode.
-4. Call `POST /auto-create-video` with or without `OPENAI_API_KEY`.
-5. Confirm response includes `script`, `caption_final`, `hashtags`, and `scene_plan` even if TTS is unavailable.
-6. If ffmpeg is available, confirm `video.status: "ready"` and non-empty `video.download_url` for a silent MP4.
+1. Deploy latest `main` and confirm build logs show Dockerfile steps (`FROM python:3.11-slim`, `apt-get install ... ffmpeg`).
+2. Open deploy logs and confirm `ffmpeg startup check:` appears with a version line.
+3. Set `DISABLE_TTS=true` (or unset `OPENAI_API_KEY`) and redeploy.
+4. Call `POST /auto-create-video` with a valid topic and duration (for example `{"topic":"morning productivity","duration":45}`).
+5. Confirm response has `status: "success"`, `video.status: "ready"`, non-empty `video.download_url`, and TTS marked unavailable/disabled while still returning script/caption/hashtags.
 
 ### Rollback
 
-1. Revert the commit that introduced `apt.txt` and diagnostics wording changes.
+1. Revert the Dockerfile/Railway config commit.
 2. Redeploy on Railway.

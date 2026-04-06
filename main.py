@@ -32,6 +32,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def log_ffmpeg_startup_info():
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        logger.warning("ffmpeg startup check: binary not found on PATH")
+        return
+    try:
+        proc = subprocess.run(
+            [ffmpeg_path, "-version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5
+        )
+        if proc.returncode != 0:
+            details = truncate_diagnostic_text(proc.stderr or proc.stdout or "", MAX_DIAGNOSTIC_DETAILS_LENGTH)
+            logger.warning("ffmpeg startup check: found at %s but not runnable (%s)", ffmpeg_path, details)
+            return
+        version_line = ((proc.stdout or "").strip().splitlines() or [""])[0]
+        logger.info("ffmpeg startup check: %s (%s)", ffmpeg_path, version_line)
+    except Exception as exc:
+        logger.warning("ffmpeg startup check failed: %s", exc)
+
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app"))
 FALLBACK_UPLOAD_DIR = Path(os.environ.get("FALLBACK_UPLOAD_DIR", "/tmp/app"))
 ALLOWED_MEDIA_EXTENSIONS = {
@@ -1104,6 +1127,7 @@ def run_pipeline_from_media():
 
 
 if __name__ == "__main__":
+    log_ffmpeg_startup_info()
     port = int(os.environ.get("PORT", 8080))
     logger.info(f"Starting server on 0.0.0.0:{port}")
     app.run(host="0.0.0.0", port=port, debug=False)
