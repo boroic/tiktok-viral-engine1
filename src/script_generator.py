@@ -195,7 +195,13 @@ class ScriptGenerator:
 
         selected_hook = self._pick_variant(hook_options, f"pack_hook:{variant_key}")
         effective_script = script if isinstance(script, dict) else {}
-        if not isinstance(effective_script.get("body"), (list, str)) or not isinstance(effective_script.get("cta"), str):
+        body_value = effective_script.get("body")
+        cta_value = effective_script.get("cta")
+        body_is_valid = isinstance(body_value, list) and any(str(item or "").strip() for item in body_value)
+        if isinstance(body_value, str):
+            body_is_valid = bool(body_value.strip())
+        cta_is_valid = isinstance(cta_value, str) and bool(cta_value.strip())
+        if (not body_is_valid) or (not cta_is_valid):
             effective_script = self.generate_script(
                 normalized_topic,
                 tone=tone,
