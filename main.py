@@ -37,6 +37,7 @@ MAX_MEDIA_FILES = int(os.environ.get("MAX_MEDIA_FILES", "10"))
 MAX_MEDIA_FILE_BYTES = int(os.environ.get("MAX_MEDIA_FILE_BYTES", str(100 * 1024 * 1024)))
 MEDIA_HASH_CACHE_SIZE = int(os.environ.get("MEDIA_HASH_CACHE_SIZE", "256"))
 GENERIC_TOPIC_TOKENS = {"img", "image", "vid", "video", "wa", "dsc", "pxl", "mvimg"}
+MEDIA_GROUNDING_FIELDS = ("ocr_text", "transcript_text", "keyframe_summary")
 
 
 class TikTokViralEngine:
@@ -156,11 +157,8 @@ class TikTokViralEngine:
         topic = media_context.get("topic_hint", "viral content")
         normalized_grounding = {}
         if isinstance(media_grounding, dict):
-            normalized_grounding = {
-                "ocr_text": self._normalize_optional_text(media_grounding.get("ocr_text", "")),
-                "transcript_text": self._normalize_optional_text(media_grounding.get("transcript_text", "")),
-                "keyframe_summary": self._normalize_optional_text(media_grounding.get("keyframe_summary", ""))
-            }
+            for field in MEDIA_GROUNDING_FIELDS:
+                normalized_grounding[field] = self._normalize_optional_text(media_grounding.get(field, ""))
 
         # Ground topic in available media-derived text while gracefully falling back.
         topic_candidates = [
@@ -170,16 +168,12 @@ class TikTokViralEngine:
             topic
         ]
         for candidate in topic_candidates:
-            words = [w for w in str(candidate).split() if w]
+            words = str(candidate).split()
             if words:
                 topic = " ".join(words[: self.max_topic_words])
                 break
 
-        grounding_key = "|".join([
-            normalized_grounding.get("ocr_text", ""),
-            normalized_grounding.get("transcript_text", ""),
-            normalized_grounding.get("keyframe_summary", "")
-        ])
+        grounding_key = "|".join([normalized_grounding.get(field, "") for field in MEDIA_GROUNDING_FIELDS])
         cache_key = f"{media_hash}:{topic}:{tone}:{target_audience}:{grounding_key}" if media_hash else ""
 
         if cache_key:
@@ -387,11 +381,9 @@ def run_pipeline_from_media():
         if not isinstance(target_audience, str):
             target_audience = "general"
 
-        media_grounding = {
-            "ocr_text": request.form.get("ocr_text", ""),
-            "transcript_text": request.form.get("transcript_text", ""),
-            "keyframe_summary": request.form.get("keyframe_summary", "")
-        }
+        media_grounding = {}
+        for field in MEDIA_GROUNDING_FIELDS:
+            media_grounding[field] = request.form.get(field, "")
 
         validation_errors = []
         normalized_uploads = []

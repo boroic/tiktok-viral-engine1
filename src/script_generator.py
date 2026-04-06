@@ -3,6 +3,11 @@
 import hashlib
 import re
 
+MAX_VARIANT_KEY_LENGTH = 512
+MAX_TOPIC_HASHTAG_LENGTH = 30
+MAX_TONE_HASHTAG_LENGTH = 20
+MAX_AUDIENCE_HASHTAG_LENGTH = 24
+
 class ScriptGenerator:
     """Generate viral TikTok scripts using AI"""
     
@@ -10,8 +15,11 @@ class ScriptGenerator:
         self.templates = []
     
     def _pick_variant(self, variants, key):
-        digest = hashlib.sha256(str(key).encode("utf-8")).hexdigest()
-        idx = int(digest[:8], 16) % max(len(variants), 1)
+        if not variants:
+            return ""
+        safe_key = str(key or "")[:MAX_VARIANT_KEY_LENGTH]
+        digest = hashlib.sha256(safe_key.encode("utf-8")).hexdigest()
+        idx = int(digest[:8], 16) % len(variants)
         return variants[idx]
 
     def _sanitize_topic(self, topic):
@@ -118,9 +126,9 @@ class ScriptGenerator:
     def generate_hashtags(self, topic, tone="balanced", target_audience="general", media_grounding=None):
         """Generate viral hashtags for a topic"""
         normalized_topic = self._sanitize_topic(topic).lower()
-        topic_tag = "#" + re.sub(r"[^a-z0-9]+", "", normalized_topic)[:30]
-        tone_tag = "#" + re.sub(r"[^a-z0-9]+", "", str(tone or "balanced").lower())[:20]
-        audience_tag = "#" + re.sub(r"[^a-z0-9]+", "", str(target_audience or "general").lower())[:24]
+        topic_tag = "#" + re.sub(r"[^a-z0-9]+", "", normalized_topic)[:MAX_TOPIC_HASHTAG_LENGTH]
+        tone_tag = "#" + re.sub(r"[^a-z0-9]+", "", str(tone or "balanced").lower())[:MAX_TONE_HASHTAG_LENGTH]
+        audience_tag = "#" + re.sub(r"[^a-z0-9]+", "", str(target_audience or "general").lower())[:MAX_AUDIENCE_HASHTAG_LENGTH]
 
         tags = [
             topic_tag if len(topic_tag) > 1 else "#content",
