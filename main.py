@@ -74,6 +74,13 @@ def format_srt_timestamp(seconds_float: float):
     return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
 
 
+def truncate_output(value: str, limit: int):
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]} ...[truncated]"
+
+
 class BaseTTSProvider:
     provider_name = "none"
 
@@ -180,7 +187,7 @@ class FacelessVideoAssembler:
                     "available": False,
                     "path": self.ffmpeg,
                     "message": "ffmpeg binary found but not runnable.",
-                    "details": (proc.stderr or proc.stdout or "")[-MAX_DIAGNOSTIC_OUTPUT_LENGTH:]
+                    "details": truncate_output((proc.stderr or proc.stdout or ""), MAX_DIAGNOSTIC_OUTPUT_LENGTH)
                 }
             first_line = ((proc.stdout or "").strip().splitlines() or [""])[0]
             return {
@@ -268,7 +275,7 @@ class FacelessVideoAssembler:
                     "status": "error",
                     "message": "Video assembly failed.",
                     "diagnostics": ffmpeg_diag,
-                    "details": (proc.stderr or proc.stdout or "")[-MAX_ERROR_DETAILS_LENGTH:]
+                    "details": truncate_output((proc.stderr or proc.stdout or ""), MAX_ERROR_DETAILS_LENGTH)
                 }
             return {
                 "status": "success",
@@ -623,7 +630,7 @@ class TikTokViralEngine:
                     "AI voiceover is unavailable because OPENAI_API_KEY is missing. "
                     "Set OPENAI_API_KEY to enable voice generation. Script and caption were still generated."
                 )
-            elif tts_result.get("error_type") == "rate_limited" or tts_result.get("http_status") == 429:
+            elif tts_result.get("error_type") == "rate_limited":
                 guidance = (
                     "AI voiceover hit TTS quota/rate-limit (HTTP 429). "
                     "Retry later or increase quota. Script and caption were still generated."
