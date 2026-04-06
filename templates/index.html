@@ -430,6 +430,8 @@
     var MAX_RETRIES = 2;
     var RETRY_DELAY_BASE_MS = 500;
     var RETRYABLE_STATUS = { 408: true, 429: true, 500: true, 502: true, 503: true, 504: true };
+    var DEFAULT_TOPIC = "viral_trends";
+    var DEFAULT_TARGET_AUDIENCE = "general";
     var _lastRunMode = "topic";
 
     function formatBytes(numBytes) {
@@ -670,7 +672,10 @@
     function normalizeHashtag(tag) {
       var t = String(tag || "").trim();
       if (!t) return "";
-      return t.charAt(0) === "#" ? t : ("#" + t.replace(/\s+/g, ""));
+      var normalized = (t.charAt(0) === "#" ? t : ("#" + t)).replace(/\s+/g, "");
+      var content = normalized.replace(/^#+/, "").trim();
+      if (!content) return "";
+      return "#" + content;
     }
 
     function getHashtagText(hashtags) {
@@ -691,6 +696,11 @@
       var tags = getHashtagText(hashtags);
       if (tags) lines.push(tags);
       return lines.join("\n\n").trim();
+    }
+
+    function hasMediaFiles() {
+      var mediaInput = document.getElementById("mediaInput");
+      return !!(mediaInput && mediaInput.files && mediaInput.files.length > 0);
     }
 
     function fallbackCopy(text, feedbackEl) {
@@ -883,9 +893,9 @@
 
     async function runPipeline(options) {
       options = options || {};
-      var topic = document.getElementById("topic").value.trim() || "viral_trends";
+      var topic = document.getElementById("topic").value.trim() || DEFAULT_TOPIC;
       var tone = document.getElementById("tone").value || "balanced";
-      var targetAudience = document.getElementById("targetAudience").value.trim() || "general";
+      var targetAudience = document.getElementById("targetAudience").value.trim() || DEFAULT_TARGET_AUDIENCE;
       _lastRunMode = "topic";
       _lastMediaResults = null;
       hideError();
@@ -929,7 +939,7 @@
       const mediaInput = document.getElementById("mediaInput");
       const files = Array.prototype.slice.call(mediaInput.files || []);
       var tone = document.getElementById("tone").value || "balanced";
-      var targetAudience = document.getElementById("targetAudience").value.trim() || "general";
+      var targetAudience = document.getElementById("targetAudience").value.trim() || DEFAULT_TARGET_AUDIENCE;
       var ocrText = document.getElementById("ocrText").value.trim();
       var transcriptText = document.getElementById("transcriptText").value.trim();
       var keyframeSummary = document.getElementById("keyframeSummary").value.trim();
@@ -994,8 +1004,7 @@
     }
 
     async function generateAndCopyCaption() {
-      var mediaInput = document.getElementById("mediaInput");
-      var hasMedia = !!(mediaInput && mediaInput.files && mediaInput.files.length > 0);
+      var hasMedia = hasMediaFiles();
       if (hasMedia) {
         await runFromMedia({ copyAfterGenerate: true });
       } else {
