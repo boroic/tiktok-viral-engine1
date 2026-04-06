@@ -39,6 +39,9 @@ MAX_MEDIA_FILE_BYTES = int(os.environ.get("MAX_MEDIA_FILE_BYTES", str(100 * 1024
 MEDIA_HASH_CACHE_SIZE = int(os.environ.get("MEDIA_HASH_CACHE_SIZE", "256"))
 GENERIC_TOPIC_TOKENS = {"img", "image", "vid", "video", "wa", "dsc", "pxl", "mvimg"}
 MEDIA_GROUNDING_FIELDS = ("ocr_text", "transcript_text", "keyframe_summary")
+CONTENT_MODE_CAPTION_ONLY = "caption_only"
+CONTENT_MODE_FULL_PACK = "full_content_pack"
+SUPPORTED_CONTENT_MODES = {CONTENT_MODE_CAPTION_ONLY, CONTENT_MODE_FULL_PACK}
 
 
 class TikTokViralEngine:
@@ -79,9 +82,17 @@ class TikTokViralEngine:
         topic: str = "viral_trends",
         tone: str = "balanced",
         target_audience: str = "general",
-        media_grounding=None
+        media_grounding=None,
+        content_mode: str = CONTENT_MODE_CAPTION_ONLY
     ):
         logger.info(f"Running pipeline for topic={topic}")
+        normalized_mode = (
+            content_mode.strip().lower()
+            if isinstance(content_mode, str) and content_mode.strip()
+            else CONTENT_MODE_CAPTION_ONLY
+        )
+        if normalized_mode not in SUPPORTED_CONTENT_MODES:
+            normalized_mode = CONTENT_MODE_CAPTION_ONLY
 
         health = self.api_manager.health_check()
         trends = self.trend_detector.fetch_trends()
@@ -105,6 +116,17 @@ class TikTokViralEngine:
             target_audience=target_audience,
             media_grounding=media_grounding
         )
+        full_content_pack = None
+        if normalized_mode == CONTENT_MODE_FULL_PACK:
+            full_content_pack = self.api_manager.openai.generate_full_content_pack(
+                topic,
+                tone=tone,
+                target_audience=target_audience,
+                media_grounding=media_grounding,
+                script=script,
+                hashtags=hashtags,
+                captions=captions
+            )
 
         analytics = self.video_analytics.predict_performance(script)
 
@@ -123,8 +145,13 @@ class TikTokViralEngine:
             "predicted_analytics": analytics,
             "influencers": influencers,
             "trends": trends,
-            "sounds": sounds
+            "sounds": sounds,
+            "content_mode": normalized_mode
         }
+        if full_content_pack is not None:
+            result["full_content_pack"] = full_content_pack
+            result.update(full_content_pack)
+        return result
 
     def _get_cached_media_result(self, cache_key: str):
         with self.cache_lock:
@@ -152,7 +179,8 @@ class TikTokViralEngine:
         media_hash: str = "",
         tone: str = "balanced",
         target_audience: str = "general",
-        media_grounding=None
+        media_grounding=None,
+        content_mode: str = CONTENT_MODE_CAPTION_ONLY
     ):
         media_context = self.analyze_media_context(media_path)
         topic = media_context.get("topic_hint", "viral content")
@@ -176,7 +204,10 @@ class TikTokViralEngine:
 
         grounding_key = "\x1f".join([normalized_grounding.get(field, "") for field in MEDIA_GROUNDING_FIELDS])
         grounding_fingerprint = hashlib.sha256(grounding_key.encode("utf-8")).hexdigest() if grounding_key else ""
-        cache_key = f"{media_hash}:{topic}:{tone}:{target_audience}:{grounding_fingerprint}" if media_hash else ""
+        cache_key = (
+            f"{media_hash}:{topic}:{tone}:{target_audience}:{grounding_fingerprint}:{content_mode}"
+            if media_hash else ""
+        )
 
         if cache_key:
             cached = self._get_cached_media_result(cache_key)
@@ -190,7 +221,8 @@ class TikTokViralEngine:
             topic=topic,
             tone=tone,
             target_audience=target_audience,
-            media_grounding=normalized_grounding
+            media_grounding=normalized_grounding,
+            content_mode=content_mode
         )
         if cache_key:
             self._set_cached_media_result(cache_key, result)
@@ -334,6 +366,7 @@ def run_pipeline():
         topic = data.get("topic", "viral_trends")
         tone = data.get("tone", "balanced")
         target_audience = data.get("target_audience", "general")
+        content_mode = data.get("content_mode", CONTENT_MODE_CAPTION_ONLY)
 
         if not isinstance(topic, str) or not topic.strip():
             return jsonify({
@@ -348,7 +381,8 @@ def run_pipeline():
         result = engine.run_full_pipeline(
             topic=topic.strip(),
             tone=tone.strip() or "balanced",
-            target_audience=target_audience.strip() or "general"
+            target_audience=target_audience.strip() or "general",
+            content_mode=content_mode if isinstance(content_mode, str) else CONTENT_MODE_CAPTION_ONLY
         )
         return jsonify(result), 200
 
@@ -379,10 +413,13 @@ def run_pipeline_from_media():
 
         tone = request.form.get("tone", "balanced")
         target_audience = request.form.get("target_audience", "general")
+        content_mode = request.form.get("content_mode", CONTENT_MODE_CAPTION_ONLY)
         if not isinstance(tone, str):
             tone = "balanced"
         if not isinstance(target_audience, str):
             target_audience = "general"
+        if not isinstance(content_mode, str):
+            content_mode = CONTENT_MODE_CAPTION_ONLY
 
         manual_overrides = {}
         for field in MEDIA_GROUNDING_FIELDS:
@@ -455,7 +492,8 @@ def run_pipeline_from_media():
                     media_hash=media_hash,
                     tone=tone.strip() or "balanced",
                     target_audience=target_audience.strip() or "general",
-                    media_grounding=media_grounding
+                    media_grounding=media_grounding,
+                    content_mode=content_mode.strip().lower() or CONTENT_MODE_CAPTION_ONLY
                 )
             )
             result["media_extraction"] = {
