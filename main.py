@@ -459,7 +459,7 @@ def run_pipeline_from_media():
                 )
             )
             result["media_extraction"] = {
-                "status": "success" if any(media_grounding.get(field, "") for field in MEDIA_GROUNDING_FIELDS) else "fallback",
+                "status": "signals_found" if any(media_grounding.get(field, "") for field in MEDIA_GROUNDING_FIELDS) else "signals_not_found",
                 "signals_detected": {
                     field: bool(media_grounding.get(field, ""))
                     for field in MEDIA_GROUNDING_FIELDS

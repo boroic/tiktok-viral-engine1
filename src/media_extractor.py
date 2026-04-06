@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -28,15 +29,40 @@ logger = logging.getLogger(__name__)
 
 VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "mkv", "webm"}
 GENERIC_FILENAME_TOKENS = {"img", "image", "vid", "video", "dsc", "pxl", "mvimg"}
+MAX_SIGNAL_TEXT_LENGTH = 1200
+MAX_OCR_TEXT_LENGTH = 600
+MAX_KEYFRAME_SUMMARY_LENGTH = 240
 
 
 class MediaExtractor:
-    def __init__(self, timeout_seconds=8, max_retries=2, backoff_seconds=0.4):
-        self.timeout_seconds = max(1, int(timeout_seconds))
-        self.max_retries = max(0, int(max_retries))
+    def __init__(self, timeout_seconds=None, max_retries=None, backoff_seconds=None):
+        if timeout_seconds is None:
+            timeout_seconds = self._parse_int_env("MEDIA_EXTRACT_TIMEOUT_SECONDS", 8)
+        if max_retries is None:
+            max_retries = self._parse_int_env("MEDIA_EXTRACT_MAX_RETRIES", 2)
+        if backoff_seconds is None:
+            backoff_seconds = self._parse_float_env("MEDIA_EXTRACT_BACKOFF_SECONDS", 0.4)
+        self.timeout_seconds = max(1, timeout_seconds)
+        self.max_retries = max(0, max_retries)
         self.backoff_seconds = max(0.0, float(backoff_seconds))
 
-    def _normalize(self, value, max_len=1200):
+    def _parse_int_env(self, name, default):
+        raw = os.environ.get(name, str(default))
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            logger.warning("Invalid %s=%r; using default %s", name, raw, default)
+            return int(default)
+
+    def _parse_float_env(self, name, default):
+        raw = os.environ.get(name, str(default))
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            logger.warning("Invalid %s=%r; using default %s", name, raw, default)
+            return float(default)
+
+    def _sanitize_signal_text(self, value, max_len=MAX_SIGNAL_TEXT_LENGTH):
         compact = " ".join(str(value or "").split()).strip()
         return compact[:max_len]
 
@@ -78,12 +104,12 @@ class MediaExtractor:
                     return ""
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 text = pytesseract.image_to_string(rgb)
-                return self._normalize(text, max_len=600)
+                return self._sanitize_signal_text(text, max_len=MAX_OCR_TEXT_LENGTH)
             finally:
                 cap.release()
         with Image.open(media_path) as img:
             text = pytesseract.image_to_string(img)
-            return self._normalize(text, max_len=600)
+            return self._sanitize_signal_text(text, max_len=MAX_OCR_TEXT_LENGTH)
 
     def _extract_audio_transcript(self, media_path: Path, is_video: bool):
         # Optional STT dependencies are not required for runtime stability.
@@ -98,7 +124,7 @@ class MediaExtractor:
             cap = cv2.VideoCapture(str(media_path))
             try:
                 if not cap.isOpened():
-                    return self._normalize(filename_hint)
+                    return self._sanitize_signal_text(filename_hint)
                 width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
                 height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
                 fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
@@ -111,7 +137,7 @@ class MediaExtractor:
                     parts.append(f"{width}x{height} video")
                 if duration > 0:
                     parts.append(f"~{duration:.1f}s")
-                return self._normalize(", ".join(parts), max_len=240)
+                return self._sanitize_signal_text(", ".join(parts), max_len=MAX_KEYFRAME_SUMMARY_LENGTH)
             finally:
                 cap.release()
         if not is_video and Image is not None:
@@ -126,10 +152,10 @@ class MediaExtractor:
                         parts.append(f"{width}x{height} image")
                     if mode:
                         parts.append(mode)
-                    return self._normalize(", ".join(parts), max_len=240)
+                    return self._sanitize_signal_text(", ".join(parts), max_len=MAX_KEYFRAME_SUMMARY_LENGTH)
             except Exception:  # pragma: no cover - defensive
                 pass
-        return self._normalize(filename_hint, max_len=240)
+        return self._sanitize_signal_text(filename_hint, max_len=MAX_KEYFRAME_SUMMARY_LENGTH)
 
     def extract_media_signals(self, media_path: Path):
         path = Path(media_path)
