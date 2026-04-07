@@ -79,6 +79,8 @@ MAX_ARTIFACTS = int(os.environ.get("MAX_GENERATED_ARTIFACTS", "200"))
 MAX_TTS_DETAILS_LENGTH = 400
 MAX_DIAGNOSTIC_DETAILS_LENGTH = 300
 MAX_ERROR_DETAILS_LENGTH = 500
+TTS_FALLBACK_WARNING_CODE = "TTS_FALLBACK_SILENT"
+RECOVERABLE_TTS_ERROR_TYPES = {"rate_limited", "http_error", "exception"}
 
 
 def env_flag_enabled(name: str):
@@ -640,6 +642,22 @@ class TikTokViralEngine:
             }
         else:
             tts_result = self.tts_provider.synthesize(voiceover_script, normalized_voice, audio_path)
+        tts_error_type = str(tts_result.get("error_type") or "")
+        tts_message = self._normalize_optional_text(tts_result.get("message", ""), max_len=160) or "TTS unavailable"
+        fallback_warning = None
+        if tts_result.get("status") != "success":
+            logger.warning(
+                "Auto-create video: TTS failure detected (type=%s, status=%s): %s",
+                tts_error_type or "unknown",
+                tts_result.get("http_status", "n/a"),
+                tts_message
+            )
+            if tts_error_type in RECOVERABLE_TTS_ERROR_TYPES:
+                fallback_warning = {
+                    "warning_code": TTS_FALLBACK_WARNING_CODE,
+                    "warning_message": f"Video generated without voiceover due to TTS issue: {tts_message}"
+                }
+                logger.info("Auto-create video: fallback mode activated (silent render)")
         self.video_assembler.build_subtitles(scene_plan, normalized_duration, subtitle_path)
         video_result = self.video_assembler.assemble(
             duration_seconds=normalized_duration,
@@ -652,10 +670,13 @@ class TikTokViralEngine:
             self._register_artifact(artifact_id, output_path)
             mp4_url = f"/artifacts/{artifact_id}/download"
             video_status = "ready"
-            if tts_result.get("status") != "success":
+            if fallback_warning:
+                video_message = fallback_warning["warning_message"]
+            elif tts_result.get("status") != "success":
                 video_message = "Voiceover disabled (no API credit). Generated silent video."
             else:
                 video_message = "Faceless video generated successfully."
+            logger.info("Auto-create video: final render success (artifact_id=%s, silent=%s)", artifact_id, tts_result.get("status") != "success")
         else:
             mp4_url = ""
             video_status = "not_generated"
@@ -668,6 +689,7 @@ class TikTokViralEngine:
                 if tts_message:
                     missing.append(tts_message)
             video_message = " ".join([str(part) for part in missing if part]).strip()
+            logger.error("Auto-create video: final render failed: %s", video_message_text)
 
         guidance = None
         if tts_result.get("status") != "success":
@@ -721,6 +743,7 @@ class TikTokViralEngine:
                 "diagnostics": video_result.get("diagnostics", {})
             },
             "tts": tts_result,
+            "warnings": [fallback_warning] if fallback_warning else [],
             "guidance": guidance
         }
 

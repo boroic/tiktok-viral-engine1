@@ -92,6 +92,7 @@ No-cost mode:
 - If `DISABLE_TTS=true`, voiceover is always skipped (forced no-voice mode).
 - If ffmpeg is available, the endpoint still exports a silent MP4 with text overlays.
 - Script/scene plan/caption/hashtags are still returned in all these cases.
+- On recoverable TTS errors (including HTTP 429), response includes `warnings: [{"warning_code":"TTS_FALLBACK_SILENT", ...}]` and `video.message` explains that voiceover was skipped.
 
 ```bash
 curl -X POST http://localhost:8080/auto-create-video \
