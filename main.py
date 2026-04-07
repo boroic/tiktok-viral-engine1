@@ -79,6 +79,7 @@ MAX_ARTIFACTS = int(os.environ.get("MAX_GENERATED_ARTIFACTS", "200"))
 MAX_TTS_DETAILS_LENGTH = 400
 MAX_DIAGNOSTIC_DETAILS_LENGTH = 300
 MAX_ERROR_DETAILS_LENGTH = 500
+MAX_TTS_MESSAGE_LENGTH = 160
 TTS_FALLBACK_WARNING_CODE = "TTS_FALLBACK_SILENT"
 RECOVERABLE_TTS_ERROR_TYPES = {"rate_limited", "http_error", "exception"}
 
@@ -642,10 +643,11 @@ class TikTokViralEngine:
             }
         else:
             tts_result = self.tts_provider.synthesize(voiceover_script, normalized_voice, audio_path)
-        tts_error_type = str(tts_result.get("error_type") or "")
-        tts_message = self._normalize_optional_text(tts_result.get("message", ""), max_len=160) or "TTS unavailable"
+        tts_error_type = tts_result.get("error_type", "") or ""
+        tts_message = self._normalize_optional_text(tts_result.get("message", ""), max_len=MAX_TTS_MESSAGE_LENGTH) or "TTS unavailable"
+        is_silent_render = tts_result.get("status") != "success"
         fallback_warning = None
-        if tts_result.get("status") != "success":
+        if is_silent_render:
             logger.warning(
                 "Auto-create video: TTS failure detected (type=%s, status=%s): %s",
                 tts_error_type or "unknown",
@@ -655,7 +657,7 @@ class TikTokViralEngine:
             if tts_error_type in RECOVERABLE_TTS_ERROR_TYPES:
                 fallback_warning = {
                     "warning_code": TTS_FALLBACK_WARNING_CODE,
-                    "warning_message": f"Video generated without voiceover due to TTS issue: {tts_message}"
+                    "warning_message": f"Video generated without voiceover. TTS service temporarily unavailable: {tts_message}"
                 }
                 logger.info("Auto-create video: fallback mode activated (silent render)")
         self.video_assembler.build_subtitles(scene_plan, normalized_duration, subtitle_path)
@@ -663,7 +665,7 @@ class TikTokViralEngine:
             duration_seconds=normalized_duration,
             subtitle_path=subtitle_path,
             output_path=output_path,
-            audio_path=audio_path if tts_result.get("status") == "success" else None
+            audio_path=audio_path if not is_silent_render else None
         )
 
         if video_result.get("status") == "success":
@@ -672,11 +674,11 @@ class TikTokViralEngine:
             video_status = "ready"
             if fallback_warning:
                 video_message = fallback_warning["warning_message"]
-            elif tts_result.get("status") != "success":
+            elif is_silent_render:
                 video_message = "Voiceover disabled (no API credit). Generated silent video."
             else:
                 video_message = "Faceless video generated successfully."
-            logger.info("Auto-create video: final render success (artifact_id=%s, silent=%s)", artifact_id, tts_result.get("status") != "success")
+            logger.info("Auto-create video: final render success (artifact_id=%s, silent=%s)", artifact_id, is_silent_render)
         else:
             mp4_url = ""
             video_status = "not_generated"
@@ -684,15 +686,14 @@ class TikTokViralEngine:
             video_message_text = video_result.get("message", "Video assembly unavailable")
             if video_message_text:
                 missing.append(video_message_text)
-            if tts_result.get("status") != "success":
-                tts_message = tts_result.get("message", "TTS unavailable")
+            if is_silent_render:
                 if tts_message:
                     missing.append(tts_message)
             video_message = " ".join([str(part) for part in missing if part]).strip()
             logger.error("Auto-create video: final render failed: %s", video_message_text)
 
         guidance = None
-        if tts_result.get("status") != "success":
+        if is_silent_render:
             if tts_result.get("error_type") == "missing_api_key":
                 guidance = (
                     "Voiceover is disabled due to missing API credit/key. "

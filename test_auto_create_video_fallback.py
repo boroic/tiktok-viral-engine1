@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import main
+import main as video_engine
 
 
 class _StubOpenAI:
@@ -56,7 +56,7 @@ class _StubTTSProvider:
 class AutoCreateVideoFallbackTests(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = tempfile.TemporaryDirectory()
-        self.upload_dir_patch = patch.object(main, "UPLOAD_STORAGE_DIR", Path(self.tmp_dir.name))
+        self.upload_dir_patch = patch.object(video_engine, "UPLOAD_STORAGE_DIR", Path(self.tmp_dir.name))
         self.upload_dir_patch.start()
 
     def tearDown(self):
@@ -64,7 +64,7 @@ class AutoCreateVideoFallbackTests(unittest.TestCase):
         self.tmp_dir.cleanup()
 
     def _build_engine(self, tts_result, assemble_result):
-        engine = main.TikTokViralEngine()
+        engine = video_engine.TikTokViralEngine()
         engine.api_manager = _StubAPIManager()
         engine.tts_provider = _StubTTSProvider(tts_result)
         engine.video_assembler = _StubVideoAssembler(assemble_result)
@@ -87,7 +87,7 @@ class AutoCreateVideoFallbackTests(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["video"]["status"], "ready")
         self.assertTrue(result["video"]["download_url"])
-        self.assertEqual(result["warnings"][0]["warning_code"], main.TTS_FALLBACK_WARNING_CODE)
+        self.assertEqual(result["warnings"][0]["warning_code"], video_engine.TTS_FALLBACK_WARNING_CODE)
         self.assertIn("HTTP 429", result["warnings"][0]["warning_message"])
         self.assertIn("without voiceover", result["video"]["message"])
         self.assertIsNone(engine.video_assembler.last_audio_path)
@@ -105,7 +105,7 @@ class AutoCreateVideoFallbackTests(unittest.TestCase):
         result = engine.auto_create_video("topic", "balanced", "general", 45, "female", "educational")
 
         self.assertEqual(result["video"]["status"], "ready")
-        self.assertEqual(result["warnings"][0]["warning_code"], main.TTS_FALLBACK_WARNING_CODE)
+        self.assertEqual(result["warnings"][0]["warning_code"], video_engine.TTS_FALLBACK_WARNING_CODE)
         self.assertIn("timeout", result["warnings"][0]["warning_message"])
         self.assertTrue(result.get("scene_plan"))
         self.assertTrue(result.get("caption_final"))
