@@ -145,7 +145,7 @@ class FacelessVideoAssemblerFallbackCommandTests(unittest.TestCase):
     def _build_assembler(self, mode):
         assembler = main.FacelessVideoAssembler()
         assembler.ffmpeg = "/usr/bin/ffmpeg"
-        assembler.silent_fallback_mode = mode
+        assembler.audio_fallback_mode = mode
         return assembler
 
     @patch.object(main.FacelessVideoAssembler, "ffmpeg_diagnostics", return_value={"available": True, "path": "/usr/bin/ffmpeg"})

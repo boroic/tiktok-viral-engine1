@@ -80,6 +80,7 @@ MAX_ARTIFACTS = int(os.environ.get("MAX_GENERATED_ARTIFACTS", "200"))
 MAX_TTS_DETAILS_LENGTH = 400
 MAX_DIAGNOSTIC_DETAILS_LENGTH = 300
 MAX_ERROR_DETAILS_LENGTH = 500
+MIN_VIDEO_DURATION_SECONDS = 1.0
 TTS_FALLBACK_WARNING_CODE = "TTS_FALLBACK_SILENT"
 RECOVERABLE_TTS_ERROR_TYPES = {"rate_limited", "http_error", "exception"}
 
@@ -198,7 +199,12 @@ class OpenAITTSProvider(BaseTTSProvider):
 class FacelessVideoAssembler:
     def __init__(self):
         self.ffmpeg = shutil.which("ffmpeg")
-        self.silent_fallback_mode = str(os.environ.get("SILENT_FALLBACK_MODE", "silent_audio_mux")).strip().lower()
+        if os.environ.get("SILENT_FALLBACK_MODE"):
+            logger.warning("SILENT_FALLBACK_MODE is deprecated; use AUDIO_FALLBACK_MODE instead.")
+        legacy_mode = os.environ.get("SILENT_FALLBACK_MODE", "").strip()
+        self.audio_fallback_mode = str(
+            os.environ.get("AUDIO_FALLBACK_MODE", legacy_mode or "silent_audio_mux")
+        ).strip().lower()
 
     def ffmpeg_diagnostics(self):
         """Check ffmpeg presence/runtime and return lightweight diagnostics."""
@@ -254,11 +260,11 @@ class FacelessVideoAssembler:
         return escaped
 
     def _resolve_silent_fallback_mode(self):
-        if self.silent_fallback_mode == "video_only":
+        if self.audio_fallback_mode == "video_only":
             return "video-only"
         return "silent-audio-mux"
 
-    def _sanitize_ffmpeg_command(self, cmd):
+    def _format_ffmpeg_command_for_logging(self, cmd):
         return " ".join(shlex.quote(str(part)) for part in cmd)
 
     def build_subtitles(self, scene_plan, duration_seconds: int, destination: Path):
@@ -304,7 +310,7 @@ class FacelessVideoAssembler:
             f"subtitles={safe_subtitle_path}:force_style="
             "'Fontsize=44,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,MarginV=150'"
         )
-        video_duration = max(1.0, float(duration_seconds or 0))
+        video_duration = max(MIN_VIDEO_DURATION_SECONDS, float(duration_seconds or 0))
         has_narration_audio = bool(audio_path and audio_path.exists())
         silent_fallback_stage = self._resolve_silent_fallback_mode()
         fallback_stage = "narration-audio" if has_narration_audio else silent_fallback_stage
@@ -317,7 +323,7 @@ class FacelessVideoAssembler:
         if has_narration_audio:
             cmd.extend(["-i", str(audio_path)])
         elif fallback_stage == "silent-audio-mux":
-            silent_duration = max(video_duration, float(duration_seconds or 0))
+            silent_duration = video_duration
             cmd.extend(["-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo:d={silent_duration}"])
         cmd.extend([
             "-vf", filter_expr,
@@ -335,7 +341,7 @@ class FacelessVideoAssembler:
         cmd.extend([
             str(output_path)
         ])
-        sanitized_cmd = self._sanitize_ffmpeg_command(cmd)
+        sanitized_cmd = self._format_ffmpeg_command_for_logging(cmd)
         logger.info("Auto-create video: ffmpeg stage=%s command=%s", fallback_stage, sanitized_cmd)
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120)
@@ -348,8 +354,7 @@ class FacelessVideoAssembler:
                     "diagnostics": ffmpeg_diag,
                     "details": stderr_excerpt,
                     "command": sanitized_cmd,
-                    "fallback_stage": fallback_stage,
-                    "stderr_excerpt": stderr_excerpt
+                    "fallback_stage": fallback_stage
                 }
             return {
                 "status": "success",
@@ -593,9 +598,12 @@ class TikTokViralEngine:
         return plan
 
     def _compute_total_scene_duration(self, scene_plan, fallback_duration):
-        total_duration = float(fallback_duration or 0)
+        try:
+            total_duration = float(fallback_duration or 0)
+        except Exception:
+            total_duration = 0.0
         if not isinstance(scene_plan, list):
-            return max(1.0, total_duration)
+            return max(MIN_VIDEO_DURATION_SECONDS, total_duration)
         for scene in scene_plan:
             if not isinstance(scene, dict):
                 continue
@@ -609,7 +617,7 @@ class TikTokViralEngine:
                 end_second = start_second
             scene_end = max(start_second, end_second)
             total_duration = max(total_duration, scene_end)
-        return max(1.0, total_duration)
+        return max(MIN_VIDEO_DURATION_SECONDS, total_duration)
 
     def _register_artifact(self, artifact_id: str, output_path: Path):
         with self.artifact_lock:
