@@ -14,6 +14,7 @@ from urllib import request as urllib_request
 from urllib import error as urllib_error
 import json
 import re
+import shlex
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
@@ -79,6 +80,7 @@ MAX_ARTIFACTS = int(os.environ.get("MAX_GENERATED_ARTIFACTS", "200"))
 MAX_TTS_DETAILS_LENGTH = 400
 MAX_DIAGNOSTIC_DETAILS_LENGTH = 300
 MAX_ERROR_DETAILS_LENGTH = 500
+MIN_VIDEO_DURATION_SECONDS = 1.0
 TTS_FALLBACK_WARNING_CODE = "TTS_FALLBACK_SILENT"
 RECOVERABLE_TTS_ERROR_TYPES = {"rate_limited", "http_error", "exception"}
 
@@ -197,6 +199,12 @@ class OpenAITTSProvider(BaseTTSProvider):
 class FacelessVideoAssembler:
     def __init__(self):
         self.ffmpeg = shutil.which("ffmpeg")
+        if os.environ.get("SILENT_FALLBACK_MODE"):
+            logger.warning("SILENT_FALLBACK_MODE is deprecated; use AUDIO_FALLBACK_MODE instead.")
+        legacy_mode = os.environ.get("SILENT_FALLBACK_MODE", "").strip()
+        self.audio_fallback_mode = str(
+            os.environ.get("AUDIO_FALLBACK_MODE", legacy_mode or "silent_audio_mux")
+        ).strip().lower()
 
     def ffmpeg_diagnostics(self):
         """Check ffmpeg presence/runtime and return lightweight diagnostics."""
@@ -251,6 +259,14 @@ class FacelessVideoAssembler:
         escaped = escaped.replace("]", r"\]")
         return escaped
 
+    def _resolve_silent_fallback_mode(self):
+        if self.audio_fallback_mode == "video_only":
+            return "video-only"
+        return "silent-audio-mux"
+
+    def _format_ffmpeg_command_for_logging(self, cmd):
+        return " ".join(shlex.quote(str(part)) for part in cmd)
+
     def build_subtitles(self, scene_plan, duration_seconds: int, destination: Path):
         lines = []
         safe_scenes = scene_plan if isinstance(scene_plan, list) and scene_plan else []
@@ -280,49 +296,81 @@ class FacelessVideoAssembler:
                 "message": "ffmpeg is missing or not runnable in this environment. Ensure deployment installs ffmpeg.",
                 "diagnostics": ffmpeg_diag
             }
+        if not subtitle_path.exists():
+            return {
+                "status": "error",
+                "message": "Video assembly failed.",
+                "diagnostics": ffmpeg_diag,
+                "details": "Missing required subtitle input.",
+                "fallback_stage": "validation"
+            }
 
         safe_subtitle_path = self._escape_subtitle_filter_path(subtitle_path)
         filter_expr = (
             f"subtitles={safe_subtitle_path}:force_style="
             "'Fontsize=44,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,MarginV=150'"
         )
+        video_duration = max(MIN_VIDEO_DURATION_SECONDS, float(duration_seconds or 0))
+        has_narration_audio = bool(audio_path and audio_path.exists())
+        silent_fallback_stage = self._resolve_silent_fallback_mode()
+        fallback_stage = "narration-audio" if has_narration_audio else silent_fallback_stage
         cmd = [
             self.ffmpeg,
             "-y",
             "-f", "lavfi",
-            "-i", f"color=c=0x111111:s=1080x1920:d={duration_seconds}",
+            "-i", f"color=c=0x111111:s=1080x1920:d={video_duration}",
         ]
-        if audio_path and audio_path.exists():
+        if has_narration_audio:
             cmd.extend(["-i", str(audio_path)])
-        else:
-            cmd.extend(["-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo:d={duration_seconds}"])
+        elif fallback_stage == "silent-audio-mux":
+            silent_duration = video_duration
+            cmd.extend(["-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo:d={silent_duration}"])
         cmd.extend([
             "-vf", filter_expr,
             "-c:v", "libx264",
             "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-shortest",
+            "-movflags", "+faststart",
+        ])
+        if has_narration_audio or fallback_stage == "silent-audio-mux":
+            cmd.extend([
+                "-c:a", "aac",
+                "-shortest",
+            ])
+        else:
+            cmd.append("-an")
+        cmd.extend([
             str(output_path)
         ])
+        sanitized_cmd = self._format_ffmpeg_command_for_logging(cmd)
+        logger.info("Auto-create video: ffmpeg stage=%s command=%s", fallback_stage, sanitized_cmd)
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120)
             if proc.returncode != 0:
+                stderr_excerpt = truncate_diagnostic_text((proc.stderr or proc.stdout or ""), MAX_ERROR_DETAILS_LENGTH)
+                logger.error("Auto-create video: ffmpeg failed stage=%s stderr=%s", fallback_stage, stderr_excerpt)
                 return {
                     "status": "error",
                     "message": "Video assembly failed.",
                     "diagnostics": ffmpeg_diag,
-                    "details": truncate_diagnostic_text((proc.stderr or proc.stdout or ""), MAX_ERROR_DETAILS_LENGTH)
+                    "details": stderr_excerpt,
+                    "command": sanitized_cmd,
+                    "fallback_stage": fallback_stage
                 }
             return {
                 "status": "success",
                 "message": "MP4 generated successfully.",
-                "diagnostics": ffmpeg_diag
+                "diagnostics": ffmpeg_diag,
+                "command": sanitized_cmd,
+                "fallback_stage": fallback_stage
             }
         except Exception as exc:
+            logger.error("Auto-create video: ffmpeg execution exception stage=%s error=%s", fallback_stage, exc)
             return {
                 "status": "error",
                 "message": f"Video assembly failed: {exc}",
-                "diagnostics": ffmpeg_diag
+                "diagnostics": ffmpeg_diag,
+                "command": sanitized_cmd,
+                "fallback_stage": fallback_stage
             }
 
 
@@ -549,6 +597,28 @@ class TikTokViralEngine:
             cursor = end
         return plan
 
+    def _compute_total_scene_duration(self, scene_plan, fallback_duration):
+        try:
+            total_duration = float(fallback_duration or 0)
+        except Exception:
+            total_duration = 0.0
+        if not isinstance(scene_plan, list):
+            return max(MIN_VIDEO_DURATION_SECONDS, total_duration)
+        for scene in scene_plan:
+            if not isinstance(scene, dict):
+                continue
+            try:
+                start_second = float(scene.get("start_second", 0) or 0)
+            except Exception:
+                start_second = 0.0
+            try:
+                end_second = float(scene.get("end_second", start_second) or start_second)
+            except Exception:
+                end_second = start_second
+            scene_end = max(start_second, end_second)
+            total_duration = max(total_duration, scene_end)
+        return max(MIN_VIDEO_DURATION_SECONDS, total_duration)
+
     def _register_artifact(self, artifact_id: str, output_path: Path):
         with self.artifact_lock:
             self.generated_artifacts[artifact_id] = str(output_path)
@@ -615,6 +685,7 @@ class TikTokViralEngine:
             caption_final = self._normalize_optional_text(" ".join(captions) if isinstance(captions, list) else captions, max_len=1200)
 
         scene_plan = self._build_scene_plan(script, normalized_duration, normalized_style)
+        total_scene_duration = self._compute_total_scene_duration(scene_plan, normalized_duration)
         voiceover_script = self._normalize_optional_text(pack.get("voiceover_script", ""), max_len=MAX_VOICEOVER_CHARS)
         if not voiceover_script:
             voiceover_lines = []
@@ -658,9 +729,9 @@ class TikTokViralEngine:
                     "warning_message": f"Video generated without voiceover due to TTS issue: {tts_message}"
                 }
                 logger.info("Auto-create video: fallback mode activated (silent render)")
-        self.video_assembler.build_subtitles(scene_plan, normalized_duration, subtitle_path)
+        self.video_assembler.build_subtitles(scene_plan, total_scene_duration, subtitle_path)
         video_result = self.video_assembler.assemble(
-            duration_seconds=normalized_duration,
+            duration_seconds=total_scene_duration,
             subtitle_path=subtitle_path,
             output_path=output_path,
             audio_path=audio_path if tts_result.get("status") == "success" else None
@@ -669,7 +740,7 @@ class TikTokViralEngine:
         if video_result.get("status") == "success":
             self._register_artifact(artifact_id, output_path)
             mp4_url = f"/artifacts/{artifact_id}/download"
-            video_status = "ready"
+            video_status = "generated"
             if fallback_warning:
                 video_message = fallback_warning["warning_message"]
             elif tts_result.get("status") != "success":
