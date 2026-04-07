@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import subprocess
 
 import main
 
@@ -85,7 +86,7 @@ class AutoCreateVideoFallbackTests(unittest.TestCase):
         result = engine.auto_create_video("topic", "balanced", "general", 45, "female", "educational")
 
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["video"]["status"], "ready")
+        self.assertEqual(result["video"]["status"], "generated")
         self.assertTrue(result["video"]["download_url"])
         self.assertEqual(result["warnings"][0]["warning_code"], main.TTS_FALLBACK_WARNING_CODE)
         self.assertIn("HTTP 429", result["warnings"][0]["warning_message"])
@@ -104,7 +105,7 @@ class AutoCreateVideoFallbackTests(unittest.TestCase):
 
         result = engine.auto_create_video("topic", "balanced", "general", 45, "female", "educational")
 
-        self.assertEqual(result["video"]["status"], "ready")
+        self.assertEqual(result["video"]["status"], "generated")
         self.assertEqual(result["warnings"][0]["warning_code"], main.TTS_FALLBACK_WARNING_CODE)
         self.assertIn("timeout", result["warnings"][0]["warning_message"])
         self.assertTrue(result.get("scene_plan"))
@@ -127,6 +128,74 @@ class AutoCreateVideoFallbackTests(unittest.TestCase):
         self.assertEqual(result["video"]["status"], "not_generated")
         self.assertEqual(result["video"]["download_url"], "")
         self.assertIn("Video assembly failed.", result["video"]["message"])
+        self.assertEqual(result["status"], "success")
+
+
+class FacelessVideoAssemblerFallbackCommandTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.tmp_dir.name)
+        self.subtitle_path = self.tmp_path / "subtitles.srt"
+        self.subtitle_path.write_text("1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8")
+        self.output_path = self.tmp_path / "output.mp4"
+
+    def tearDown(self):
+        self.tmp_dir.cleanup()
+
+    def _build_assembler(self, mode):
+        assembler = main.FacelessVideoAssembler()
+        assembler.ffmpeg = "/usr/bin/ffmpeg"
+        assembler.silent_fallback_mode = mode
+        return assembler
+
+    @patch.object(main.FacelessVideoAssembler, "ffmpeg_diagnostics", return_value={"available": True, "path": "/usr/bin/ffmpeg"})
+    @patch("main.subprocess.run")
+    def test_tts_429_fallback_video_only_path_success(self, mock_run, _mock_diag):
+        mock_run.return_value = subprocess.CompletedProcess(args=["ffmpeg"], returncode=0, stdout="", stderr="")
+        assembler = self._build_assembler("video_only")
+
+        result = assembler.assemble(45, self.subtitle_path, self.output_path, audio_path=None)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["fallback_stage"], "video-only")
+        cmd = mock_run.call_args[0][0]
+        cmd_text = " ".join(cmd)
+        self.assertIn("-an", cmd)
+        self.assertNotIn("anullsrc", cmd_text)
+        self.assertIn("+faststart", cmd)
+        self.assertIn("libx264", cmd)
+        self.assertIn("yuv420p", cmd)
+
+    @patch.object(main.FacelessVideoAssembler, "ffmpeg_diagnostics", return_value={"available": True, "path": "/usr/bin/ffmpeg"})
+    @patch("main.subprocess.run")
+    def test_tts_429_fallback_silent_audio_mux_path_success(self, mock_run, _mock_diag):
+        mock_run.return_value = subprocess.CompletedProcess(args=["ffmpeg"], returncode=0, stdout="", stderr="")
+        assembler = self._build_assembler("silent_audio_mux")
+
+        result = assembler.assemble(45, self.subtitle_path, self.output_path, audio_path=None)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["fallback_stage"], "silent-audio-mux")
+        cmd = mock_run.call_args[0][0]
+        cmd_text = " ".join(cmd)
+        self.assertIn("anullsrc=r=44100:cl=stereo:d=45.0", cmd_text)
+        self.assertIn("-shortest", cmd)
+        self.assertIn("aac", cmd)
+        self.assertIn("+faststart", cmd)
+
+    @patch.object(main.FacelessVideoAssembler, "ffmpeg_diagnostics", return_value={"available": True, "path": "/usr/bin/ffmpeg"})
+    @patch("main.subprocess.run")
+    def test_missing_scene_input_fails(self, mock_run, _mock_diag):
+        assembler = self._build_assembler("silent_audio_mux")
+        missing_subtitle = self.tmp_path / "missing.srt"
+
+        result = assembler.assemble(45, missing_subtitle, self.output_path, audio_path=None)
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "Video assembly failed.")
+        self.assertIn("Missing required subtitle input.", result["details"])
+        self.assertEqual(result["fallback_stage"], "validation")
+        mock_run.assert_not_called()
 
 
 if __name__ == "__main__":
